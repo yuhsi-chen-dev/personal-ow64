@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local sqlite
+ow64.db
+ow64.db-*
+
+# claude code：skills 與共用設定要進版控，個人設定與備份檔不要
+.claude/settings.local.json
+*.bak
