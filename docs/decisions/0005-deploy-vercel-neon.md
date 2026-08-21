@@ -31,6 +31,9 @@ Drizzle 保留，driver 換成 `@neondatabase/serverless` + `drizzle-orm/neon-ht
 - 需要 `DATABASE_URL` 環境變數，本機放專案根目錄的 `.env.local`（已被 gitignore，
   Next.js 會自動載入）。沒設定時 `getDb()` 會直接丟錯，不要改成靜默 fallback。
   連線建立是 lazy 的，所以 `npm run build` 與 `npm run typecheck` 不需要這個變數。
+  `drizzle-kit` 不是 Next 的一部分、不會自動讀 `.env.local`，所以 `db:migrate`
+  這個 script 用 `node --env-file-if-exists=` 明確載入（用 `-if-exists` 是為了
+  在 Vercel／CI 上沒有這個檔時不會失敗，那裡的環境變數由平台注入）。
 - **建立 Neon 專案時不需要開啟 Neon Auth。** 那是「使用者登入 + 把使用者同步進 Postgres」
   的功能，現在是單機單使用者、沒有帳號系統，開了只會多出一組用不到的 schema，
   讓實際資料庫跟 `db/schema.ts` 對不起來。它隨時可以事後開啟，不是建立專案當下的決定。
