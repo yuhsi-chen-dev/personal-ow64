@@ -4,10 +4,10 @@ import { layout, SIZE, type Cell } from "@/lib/mandala.ts";
 import { rollup, type Action, type Log } from "@/lib/progress.ts";
 import { logProgress, saveAction, saveSubGoal } from "@/app/actions.ts";
 import { ActionForm } from "@/app/action-form.tsx";
+import { LocalDayInput } from "@/app/local-day-input.tsx";
 
 // ponytail: 統計區間先固定 30 天。要讓使用者自選時再拉成參數。
 const RANGE_DAYS = 30;
-const today = () => new Date().toISOString().slice(0, 10);
 
 // 這頁每次請求都要讀當下的資料，不能在 build 時預渲染
 // （會連不到資料庫，而且預渲染出來的進度是舊的）。
@@ -117,7 +117,7 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
           <ActionForm action={logProgress} className="flex gap-0.5 items-center border-t pt-0.5">
             <input type="hidden" name="planId" value={id} />
             <input type="hidden" name="actionId" value={act.id} />
-            <input type="hidden" name="day" value={today()} />
+            <LocalDayInput />
             {act.trackingType === "daily" ? null : (
               <input
                 name="value"
