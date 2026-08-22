@@ -29,8 +29,10 @@ export const actions = pgTable(
     subGoalId: text("sub_goal_id").notNull().references(() => subGoals.id, { onDelete: "cascade" }),
     position: integer("position").notNull(),
     title: text("title").notNull(),
-    trackingType: text("tracking_type", { enum: ["daily", "count", "percent"] }).notNull(),
-    target: integer("target"), // 僅 count 型使用
+    // 四類的語意見 docs/decisions/0008-tracking-taxonomy.md
+    trackingType: text("tracking_type", { enum: ["habit", "quota", "milestone", "mantra"] }).notNull(),
+    cadence: text("cadence", { enum: ["daily", "weekly", "monthly"] }), // 僅 habit 型使用
+    target: integer("target"), // 僅 quota 型使用
   },
   (t) => [uniqueIndex("actions_sub_goal_position_idx").on(t.subGoalId, t.position)],
 );

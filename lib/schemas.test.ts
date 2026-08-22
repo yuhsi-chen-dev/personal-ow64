@@ -10,20 +10,30 @@ test("title 去頭尾空白，空白與超長都擋", () => {
   assert.ok(!ok(planInput.safeParse({ title: "x".repeat(201) })));
 });
 
-test("target 的必填與否跟著 trackingType 走", () => {
+test("cadence 與 target 各自綁在對的 trackingType 上", () => {
   const base = { subGoalId: "sg1", position: 0, title: "跑步" };
-  assert.ok(ok(actionInput.safeParse({ ...base, trackingType: "count", target: 10 })));
-  assert.ok(!ok(actionInput.safeParse({ ...base, trackingType: "count" })), "count 少了 target 要擋");
-  assert.ok(!ok(actionInput.safeParse({ ...base, trackingType: "count", target: 0 })), "target 要正整數");
-  assert.ok(!ok(actionInput.safeParse({ ...base, trackingType: "daily", target: 10 })), "daily 不該有 target");
-  assert.equal(actionInput.parse({ ...base, trackingType: "daily" }).target, null, "daily 補成 null");
+  assert.ok(ok(actionInput.safeParse({ ...base, trackingType: "habit", cadence: "weekly" })));
+  assert.ok(!ok(actionInput.safeParse({ ...base, trackingType: "habit" })), "習慣一定要有頻率");
+  assert.ok(!ok(actionInput.safeParse({ ...base, trackingType: "habit", cadence: "yearly" })), "沒有每年這個選項");
+  assert.ok(!ok(actionInput.safeParse({ ...base, trackingType: "habit", cadence: "daily", target: 10 })), "習慣不該有目標數量");
+
+  assert.ok(ok(actionInput.safeParse({ ...base, trackingType: "quota", target: 10 })));
+  assert.ok(!ok(actionInput.safeParse({ ...base, trackingType: "quota" })), "累計少了目標要擋");
+  assert.ok(!ok(actionInput.safeParse({ ...base, trackingType: "quota", target: 0 })), "目標要大於 0");
+  assert.ok(!ok(actionInput.safeParse({ ...base, trackingType: "quota", target: 10, cadence: "daily" })), "累計不該有頻率");
+
+  for (const t of ["milestone", "mantra"] as const) {
+    const r = actionInput.parse({ ...base, trackingType: t });
+    assert.equal(r.cadence, null, `${t} 的 cadence 要補成 null`);
+    assert.equal(r.target, null, `${t} 的 target 要補成 null`);
+  }
 });
 
-test("count 少填目標時給看得懂的中文訊息，不要漏出 Zod 原文", () => {
-  const r = actionInput.safeParse({ subGoalId: "sg1", position: 0, title: "讀書", trackingType: "count" });
+test("累計少填目標時給看得懂的中文訊息，不要漏出 Zod 原文", () => {
+  const r = actionInput.safeParse({ subGoalId: "sg1", position: 0, title: "讀書", trackingType: "quota" });
   assert.ok(!r.success);
   const msg = r.error!.issues.map((i) => i.message).join("；");
-  assert.match(msg, /目標次數/);
+  assert.match(msg, /目標數量/);
   assert.doesNotMatch(msg, /Invalid input|expected/i);
 });
 
@@ -42,14 +52,17 @@ test("day 要是真實存在的日期", () => {
   assert.ok(!ok(day.safeParse("2026-8-1")), "月日要補零");
 });
 
-test("value 的合法範圍跟著 trackingType 走", () => {
+test("value 的合法範圍跟著 trackingType 走，信念型根本不能打卡", () => {
   const base = { actionId: "a1", day: "2026-08-21" };
-  assert.ok(ok(logInput.safeParse({ ...base, trackingType: "daily", value: 1 })));
-  assert.ok(!ok(logInput.safeParse({ ...base, trackingType: "daily", value: 2 })));
-  assert.ok(ok(logInput.safeParse({ ...base, trackingType: "count", value: 3 })));
-  assert.ok(!ok(logInput.safeParse({ ...base, trackingType: "count", value: 0 })));
-  assert.ok(ok(logInput.safeParse({ ...base, trackingType: "percent", value: 0 })));
-  assert.ok(ok(logInput.safeParse({ ...base, trackingType: "percent", value: 100 })));
-  assert.ok(!ok(logInput.safeParse({ ...base, trackingType: "percent", value: 101 })));
-  assert.ok(!ok(logInput.safeParse({ ...base, trackingType: "count", value: Infinity })));
+  assert.ok(ok(logInput.safeParse({ ...base, trackingType: "habit", value: 1 })));
+  assert.ok(!ok(logInput.safeParse({ ...base, trackingType: "habit", value: 2 })), "習慣一次就是一次");
+  assert.ok(ok(logInput.safeParse({ ...base, trackingType: "milestone", value: 1 })));
+  assert.ok(!ok(logInput.safeParse({ ...base, trackingType: "milestone", value: 0.5 })), "里程碑沒有半完成");
+  assert.ok(ok(logInput.safeParse({ ...base, trackingType: "quota", value: 3 })));
+  assert.ok(!ok(logInput.safeParse({ ...base, trackingType: "quota", value: 0 })));
+  assert.ok(!ok(logInput.safeParse({ ...base, trackingType: "quota", value: Infinity })));
+
+  const mantra = logInput.safeParse({ ...base, trackingType: "mantra", value: 1 });
+  assert.ok(!mantra.success, "信念型不該有紀錄");
+  assert.match(mantra.error!.issues.map((i) => i.message).join(""), /信念/);
 });

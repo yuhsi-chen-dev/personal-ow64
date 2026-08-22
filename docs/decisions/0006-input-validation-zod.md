@@ -1,6 +1,6 @@
 # 0006. 輸入驗證用 Zod
 
-- 狀態：已採納，**尚未實作**（目前沒有任何輸入路徑，因此還沒安裝 `zod`）
+- 狀態：已採納，已實作於 `lib/schemas.ts`
 - 日期：2026-08-21
 
 ## 決策
@@ -34,15 +34,16 @@ TypeScript 只在編譯期存在，執行期完全不管。使用者送進來的
 | `subGoal.position` | 整數 0..7 |
 | `action.position` | 整數 0..7 |
 | `*.title` | 同 `plan.title` |
-| `action.trackingType` | enum `daily` \| `count` \| `percent` |
-| `action.target` | 僅 `count` 型允許且必填，正整數；其餘型態必須是 `null` |
+| `action.trackingType` | enum `habit` \| `quota` \| `milestone` \| `mantra`（見 [0008](0008-tracking-taxonomy.md)） |
+| `action.cadence` | 僅 `habit` 型允許且必填，enum `daily` \| `weekly` \| `monthly`；其餘必須是 `null` |
+| `action.target` | 僅 `quota` 型允許且必填，正整數；其餘型態必須是 `null` |
 | `log.day` | `YYYY-MM-DD`，且必須是真實存在的日期（不能是 2026-02-30） |
-| `log.value` | 有限數；`daily` 恆為 1，`count` 為正數，`percent` 為 0..100 |
+| `log.value` | 有限數；`habit` 與 `milestone` 恆為 1，`quota` 為正數，`mantra` 不得有紀錄 |
 
 兩條跨欄位規則要用 `superRefine` 或 discriminated union 表達，
 **不要拆成兩次獨立驗證**：
 
-1. `target` 的必填與否取決於 `trackingType`
+1. `cadence` 與 `target` 的必填與否各自取決於 `trackingType`
 2. `log.value` 的合法範圍取決於該 action 的 `trackingType`
 
 ## 後果
@@ -52,4 +53,3 @@ TypeScript 只在編譯期存在，執行期完全不管。使用者送進來的
   但不要為了共用而把上面的規則稀釋掉。
 - Zod schema 放 `lib/schemas.ts`，與 `lib/mandala.ts`、`lib/progress.ts` 同層，
   一樣是框架無關的純邏輯。
-- 真的開始寫輸入路徑時才 `npm i zod`。現在裝一個沒有任何呼叫點的依賴沒有意義。

@@ -39,27 +39,28 @@ describe("寫入路徑（真實資料庫）", { skip }, () => {
   });
 
   test("行為改追蹤方式也是更新，target 跟著換掉", async () => {
-    await upsertAction({ subGoalId, position: 0, title: "跑步", trackingType: "daily", target: null });
-    await upsertAction({ subGoalId, position: 0, title: "跑步", trackingType: "count", target: 10 });
+    await upsertAction({ subGoalId, position: 0, title: "跑步", trackingType: "habit", cadence: "daily", target: null });
+    await upsertAction({ subGoalId, position: 0, title: "跑步", trackingType: "quota", cadence: null, target: 10 });
 
     const rows = await getDb()
       .select()
       .from(actions)
       .where(and(eq(actions.subGoalId, subGoalId), eq(actions.position, 0)));
     assert.equal(rows.length, 1);
-    assert.equal(rows[0]!.trackingType, "count");
+    assert.equal(rows[0]!.trackingType, "quota");
     assert.equal(rows[0]!.target, 10);
+    assert.equal(rows[0]!.cadence, null, "換成累計型時，原本的頻率要被清掉");
   });
 
-  test("daily 同一天打兩次卡只留一筆", async () => {
-    await upsertAction({ subGoalId, position: 1, title: "冥想", trackingType: "daily", target: null });
+  test("習慣型同一期打兩次只留一筆", async () => {
+    await upsertAction({ subGoalId, position: 1, title: "冥想", trackingType: "habit", cadence: "daily", target: null });
     const [action] = await getDb()
       .select()
       .from(actions)
       .where(and(eq(actions.subGoalId, subGoalId), eq(actions.position, 1)));
 
-    const first = await logOnce({ actionId: action!.id, trackingType: "daily", day: DAY, value: 1 });
-    const second = await logOnce({ actionId: action!.id, trackingType: "daily", day: DAY, value: 1 });
+    const first = await logOnce({ actionId: action!.id, trackingType: "habit", cadence: "daily", day: DAY, value: 1 });
+    const second = await logOnce({ actionId: action!.id, trackingType: "habit", cadence: "daily", day: DAY, value: 1 });
 
     assert.equal(first, true, "第一次要寫進去");
     assert.equal(second, false, "第二次要被擋掉");
@@ -70,20 +71,20 @@ describe("寫入路徑（真實資料庫）", { skip }, () => {
     assert.equal(rows.length, 1);
   });
 
-  test("count 同一天可以打多次，不該被冪等擋掉", async () => {
-    await upsertAction({ subGoalId, position: 2, title: "讀書", trackingType: "count", target: 10 });
+  test("累計型同一天可以記多次，不該被冪等擋掉", async () => {
+    await upsertAction({ subGoalId, position: 2, title: "讀書", trackingType: "quota", cadence: null, target: 10 });
     const [action] = await getDb()
       .select()
       .from(actions)
       .where(and(eq(actions.subGoalId, subGoalId), eq(actions.position, 2)));
 
-    assert.equal(await logOnce({ actionId: action!.id, trackingType: "count", day: DAY, value: 2 }), true);
-    assert.equal(await logOnce({ actionId: action!.id, trackingType: "count", day: DAY, value: 3 }), true);
+    assert.equal(await logOnce({ actionId: action!.id, trackingType: "quota", cadence: null, day: DAY, value: 2 }), true);
+    assert.equal(await logOnce({ actionId: action!.id, trackingType: "quota", cadence: null, day: DAY, value: 3 }), true);
 
     const rows = await getDb()
       .select()
       .from(logs)
       .where(and(eq(logs.actionId, action!.id), eq(logs.day, DAY)));
-    assert.equal(rows.length, 2, "count 不是冪等的，兩筆都要留");
+    assert.equal(rows.length, 2, "累計型不是冪等的，兩筆都要留");
   });
 });

@@ -62,3 +62,13 @@ export function layout(): Cell[] {
   }
   return cells;
 }
+
+/** 外層 3×3 的區塊編號 0..8（row-major）。中央區塊固定是 4。 */
+export const CORE_BLOCK = 4;
+
+/** 次目標 slot 所屬的外圍區塊編號。 */
+export function blockIndexOfSlot(slot: number): number {
+  const [r, c] = offset(slot);
+  return r * 3 + c;
+}
+
