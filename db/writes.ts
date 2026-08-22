@@ -1,8 +1,9 @@
 // 純資料操作，不碰 Next 的東西（revalidatePath / redirect）。
 // 抽出來是為了能在 Next 請求脈絡外被整合測試呼叫，見 db/write-path.test.ts。
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb } from "./index.ts";
 import { actions, logs, plans, subGoals } from "./schema.ts";
+import { periodKey, type Cadence } from "../lib/day.ts";
 import type { ActionInput, LogInput, SubGoalInput } from "../lib/schemas.ts";
 
 export async function insertPlan(title: string): Promise<string> {
@@ -18,13 +19,13 @@ export async function upsertSubGoal({ planId, position, title }: SubGoalInput) {
     .onConflictDoUpdate({ target: [subGoals.planId, subGoals.position], set: { title } });
 }
 
-export async function upsertAction({ subGoalId, position, title, trackingType, target }: ActionInput) {
+export async function upsertAction({ subGoalId, position, title, trackingType, cadence, target }: ActionInput) {
   await getDb()
     .insert(actions)
-    .values({ id: crypto.randomUUID(), subGoalId, position, title, trackingType, target })
+    .values({ id: crypto.randomUUID(), subGoalId, position, title, trackingType, cadence, target })
     .onConflictDoUpdate({
       target: [actions.subGoalId, actions.position],
-      set: { title, trackingType, target },
+      set: { title, trackingType, cadence, target },
     });
 }
 
@@ -34,20 +35,27 @@ export async function findAction(id: string) {
 }
 
 /**
- * 寫一筆執行紀錄。回傳 false 代表「daily 今天已經打過卡了，沒有寫入」。
+ * 寫一筆執行紀錄。回傳 false 代表「本期已經記過了，沒有寫入」。
  *
- * ponytail: daily 的同日冪等用「先查再寫」保證，沒有下 DB 唯一索引——
- * 唯一索引只對 daily 正確，但索引不能只套一種 trackingType。單人 app 沒有並行寫入。
+ * 冪等的範圍跟著型態走：habit 是當期（今天／本週／本月）、milestone 是永遠只有一次、
+ * quota 每次都要累加所以不冪等。
+ *
+ * ponytail: 用「先查再寫」保證，沒有下 DB 唯一索引——唯一索引只對某些 trackingType
+ * 正確，索引不能只套一部分列。單人 app 沒有並行寫入。
  * 見 docs/decisions/0004-single-log-table.md。
  */
-export async function logOnce({ actionId, trackingType, day, value }: LogInput): Promise<boolean> {
-  if (trackingType === "daily") {
-    const [existing] = await getDb()
-      .select({ id: logs.id })
-      .from(logs)
-      .where(and(eq(logs.actionId, actionId), eq(logs.day, day)));
-    if (existing) return false;
+export async function logOnce({ actionId, trackingType, cadence, day, value }: LogInput & { cadence: Cadence | null }): Promise<boolean> {
+  if (trackingType === "mantra") return false;
+
+  if (trackingType === "habit" || trackingType === "milestone") {
+    const existing = await getDb().select({ day: logs.day }).from(logs).where(eq(logs.actionId, actionId));
+    const already =
+      trackingType === "milestone"
+        ? existing.length > 0
+        : existing.some((l) => periodKey(l.day, cadence ?? "daily") === periodKey(day, cadence ?? "daily"));
+    if (already) return false;
   }
+
   await getDb().insert(logs).values({ id: crypto.randomUUID(), actionId, day, value });
   return true;
 }

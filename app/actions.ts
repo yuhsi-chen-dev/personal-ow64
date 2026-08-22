@@ -36,7 +36,7 @@ export async function saveSubGoal(_prev: Result, form: FormData): Promise<Result
 }
 
 export async function saveAction(_prev: Result, form: FormData): Promise<Result> {
-  // 目標欄位在表單上一直存在，但只有 count 型用得到。
+  // 頻率與目標數量在表單上一直存在，但各自只有 habit／quota 用得到。
   // 其餘型態直接丟掉使用者填的值，不要拿去驗證然後回一個他看不懂的錯。
   const rawType = str(form, "trackingType");
   const rawTarget = str(form, "target");
@@ -45,7 +45,8 @@ export async function saveAction(_prev: Result, form: FormData): Promise<Result>
     position: num(form, "position"),
     title: str(form, "title"),
     trackingType: rawType,
-    ...(rawType === "count" && rawTarget !== "" ? { target: Number(rawTarget) } : {}),
+    ...(rawType === "habit" ? { cadence: str(form, "cadence") || "daily" } : {}),
+    ...(rawType === "quota" && rawTarget !== "" ? { target: Number(rawTarget) } : {}),
   });
   if (!parsed.success) return fail(parsed.error);
 
@@ -62,11 +63,12 @@ export async function logProgress(_prev: Result, form: FormData): Promise<Result
     actionId: action.id,
     trackingType: action.trackingType,
     day: str(form, "day"),
-    value: action.trackingType === "daily" ? 1 : Number(str(form, "value")),
+    // 只有累計型會用到使用者填的數量，其餘型態一次就是一次。
+    value: action.trackingType === "quota" ? Number(str(form, "value")) : 1,
   });
   if (!parsed.success) return fail(parsed.error);
 
-  await logOnce(parsed.data);
+  await logOnce({ ...parsed.data, cadence: action.cadence });
   revalidatePath(str(form, "planId") ? `/plans/${str(form, "planId")}` : "/");
   return {};
 }
