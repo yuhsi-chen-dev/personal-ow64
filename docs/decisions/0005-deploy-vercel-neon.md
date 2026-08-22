@@ -41,4 +41,8 @@ Drizzle 保留，driver 換成 `@neondatabase/serverless` + `drizzle-orm/neon-ht
   屆時再比 Neon Auth 與 Auth.js 等方案。
 - `neon-http` 不支援跨語句 transaction，需要原子性時用 `db.batch()`；
   真的需要完整 transaction 再換 `drizzle-orm/neon-serverless`。
+- **不需要 Docker。** Vercel 吃的是 git push，build 與執行都在它自己的平台上，
+  沒有容器映像這一層；資料庫是託管的 Neon，也不需要在本機跑 DB 容器。
+  本機開發直接 `npm run dev` 就好。哪天改成自架或搬到 Fly.io／Render 那類平台，
+  才會需要 Dockerfile——那會是一個新的決策，不是現在的。
 - 免費方案的條件變動很快，額度與限制以官網為準，本文只記錄選型邏輯。
