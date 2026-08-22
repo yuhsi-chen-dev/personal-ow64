@@ -45,13 +45,16 @@ export async function saveSubGoal(_prev: Result, form: FormData): Promise<Result
 }
 
 export async function saveAction(_prev: Result, form: FormData): Promise<Result> {
+  // 目標欄位在表單上一直存在，但只有 count 型用得到。
+  // 其餘型態直接丟掉使用者填的值，不要拿去驗證然後回一個他看不懂的錯。
+  const rawType = str(form, "trackingType");
   const rawTarget = str(form, "target");
   const parsed = actionInput.safeParse({
     subGoalId: str(form, "subGoalId"),
     position: num(form, "position"),
     title: str(form, "title"),
-    trackingType: str(form, "trackingType"),
-    ...(rawTarget === "" ? {} : { target: Number(rawTarget) }),
+    trackingType: rawType,
+    ...(rawType === "count" && rawTarget !== "" ? { target: Number(rawTarget) } : {}),
   });
   if (!parsed.success) return fail(parsed.error);
   const { subGoalId, position, title, trackingType, target } = parsed.data;

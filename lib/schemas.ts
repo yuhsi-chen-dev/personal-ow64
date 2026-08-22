@@ -18,7 +18,13 @@ export const actionInput = z.intersection(
   z.object({ subGoalId: z.string().min(1), position: slot, title }),
   z.discriminatedUnion("trackingType", [
     z.object({ trackingType: z.literal("daily"), target: z.null().default(null) }),
-    z.object({ trackingType: z.literal("count"), target: z.number().int().positive("次數目標要是正整數") }),
+    z.object({
+      trackingType: z.literal("count"),
+      target: z
+        .number({ error: "選「次數」時要填目標次數" })
+        .int("目標次數要是整數")
+        .positive("目標次數要大於 0"),
+    }),
     z.object({ trackingType: z.literal("percent"), target: z.null().default(null) }),
   ]),
 );
