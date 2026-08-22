@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs migrate"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
