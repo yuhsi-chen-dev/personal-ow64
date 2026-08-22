@@ -19,6 +19,14 @@ test("target 的必填與否跟著 trackingType 走", () => {
   assert.equal(actionInput.parse({ ...base, trackingType: "daily" }).target, null, "daily 補成 null");
 });
 
+test("count 少填目標時給看得懂的中文訊息，不要漏出 Zod 原文", () => {
+  const r = actionInput.safeParse({ subGoalId: "sg1", position: 0, title: "讀書", trackingType: "count" });
+  assert.ok(!r.success);
+  const msg = r.error!.issues.map((i) => i.message).join("；");
+  assert.match(msg, /目標次數/);
+  assert.doesNotMatch(msg, /Invalid input|expected/i);
+});
+
 test("position 只收 0..7 的整數", () => {
   const base = { subGoalId: "sg1", title: "跑步", trackingType: "daily" as const };
   assert.ok(!ok(actionInput.safeParse({ ...base, position: 8 })));

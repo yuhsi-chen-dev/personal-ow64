@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { layout, CORE_COORD, SIZE, SLOTS, actionCoord, subGoalCoordInCore } from "./mandala.ts";
 import { actionProgress, rollup, type Log } from "./progress.ts";
+import { localDay } from "./day.ts";
 
 const d = (ms: number) => new Date(ms);
 
@@ -62,4 +63,16 @@ test("rollup 跨型態先正規化再平均；空的次目標是 null 不是 0",
   );
   assert.equal(r, 0.75);
   assert.equal(rollup([], logs, 30), null);
+});
+
+test("localDay 用當地日曆日，不是 UTC", () => {
+  // 當地 8/23 早上 7 點。UTC+8 的話 toISOString() 會是 8/22，會把打卡記到前一天。
+  const morning = new Date(2026, 7, 23, 7, 0, 0);
+  assert.equal(localDay(morning), "2026-08-23");
+
+  // 當地 8/23 深夜 23:30。UTC-5 的話 toISOString() 會是 8/24。
+  assert.equal(localDay(new Date(2026, 7, 23, 23, 30, 0)), "2026-08-23");
+
+  // 月、日都要補零
+  assert.equal(localDay(new Date(2026, 0, 5, 12, 0, 0)), "2026-01-05");
 });
