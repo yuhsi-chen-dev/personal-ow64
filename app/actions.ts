@@ -7,6 +7,7 @@ import {
   NotYours, deletePlan, findAction, insertPlan, logOnce, removeAction, removeSubGoal, renamePlan,
   upsertAction, upsertSubGoal,
 } from "@/db/writes.ts";
+import { loadPlan } from "@/db/queries.ts";
 import {
   actionInput, logInput, planIdInput, planInput, planRenameInput, removeInput, subGoalInput,
 } from "@/lib/schemas.ts";
@@ -158,6 +159,37 @@ export async function removeActionCell(_prev: Result, form: FormData): Promise<R
   return withUser(async (userId) => {
     await removeAction(userId, parsed.data.id);
     revalidatePath(`/plans/${parsed.data.planId}`, "layout");
+    return {};
+  });
+}
+
+/**
+ * 一次採用多則 AI 建議的次目標。
+ *
+ * **空位是在寫入的當下重新確認的，不是相信生成當時的快照。** 使用者可能在看建議的
+ * 時候自己先填了某一格；照舊快照寫下去就會蓋掉他剛打的字。已經有人的位置直接跳過，
+ * 不報錯——他要的東西已經在那裡了。
+ *
+ * 走的是跟手動存檔同一支 upsertSubGoal 與同一份 Zod schema。建議不該有捷徑。
+ */
+export async function acceptSubGoals(
+  planId: string,
+  items: { position: number; title: string }[],
+): Promise<Result> {
+  return withUser(async (userId) => {
+    const data = await loadPlan(userId, planId);
+    if (!data) return { error: "找不到，或不屬於你" };
+
+    const taken = new Set(data.subGoals.map((s) => s.position));
+    const fresh = items.filter((i) => !taken.has(i.position));
+    if (fresh.length === 0) return { error: "這些位置都已經有內容了。" };
+
+    for (const item of fresh) {
+      const parsed = subGoalInput.safeParse({ planId, position: item.position, title: item.title });
+      if (!parsed.success) return fail(parsed.error);
+      await upsertSubGoal(userId, parsed.data);
+    }
+    revalidatePath(`/plans/${planId}`, "layout");
     return {};
   });
 }

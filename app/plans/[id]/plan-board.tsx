@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import { Check, Flag, Flame, Grid3x3, Hash, Plus, Quote, Repeat, Trash2, X } from "lucide-react";
+import { useState, useTransition } from "react";
+import { Check, Flag, Flame, Grid3x3, Hash, Plus, Quote, Repeat, Sparkles, Trash2, X } from "lucide-react";
 import { ActionForm } from "@/app/action-form.tsx";
 import { ConfirmButton } from "@/app/confirm-button.tsx";
 import { useToday } from "@/app/use-today.ts";
 import {
-  logProgress, removeActionCell, removeSubGoalCell, renamePlanTitle, saveAction, saveSubGoal,
+  acceptSubGoals, logProgress, removeActionCell, removeSubGoalCell, renamePlanTitle,
+  saveAction, saveSubGoal,
 } from "@/app/actions.ts";
+import { suggestSubGoals, type Suggestion } from "@/app/ai-actions.ts";
 import {
   blockOfCell, buildBoard, heat, recentPeriods, streak, toBlocks,
   type BoardAction, type BoardSubGoal, type Cell,
@@ -65,6 +67,55 @@ export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDay
   // 存 Cell 物件的話，存檔之後面板拿的還是點下去當時的舊快照——
   // 輸入框留著舊字，再按一次儲存就把剛改好的內容蓋回去。
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // AI 的建議只活在這裡，沒有寫進資料庫。使用者按下「採用」才走 acceptSubGoals。
+  const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const bySlot = new Map((suggestions ?? []).map((x) => [x.position, x]));
+  const emptySlots = 8 - subGoals.length;
+
+  function ask() {
+    setAiError(null);
+    startTransition(async () => {
+      const res = await suggestSubGoals(planId);
+      if (res.error) setAiError(res.error);
+      setSuggestions(res.suggestions ?? null);
+    });
+  }
+
+  /** 改建議的文字。只動 client state——這些東西還沒進資料庫。 */
+  function editSuggestion(position: number, title: string) {
+    setSuggestions((cur) => (cur ?? []).map((x) => (x.position === position ? { ...x, title } : x)));
+  }
+
+  /** 不要這一格。丟掉就是丟掉，不會留一個空殼在畫面上。 */
+  function dismissSuggestion(position: number) {
+    setSuggestions((cur) => {
+      const left = (cur ?? []).filter((x) => x.position !== position);
+      return left.length ? left : null;
+    });
+    setSelectedKey(null);
+  }
+
+  function acceptAll() {
+    // 使用者可能把某一格改成空白。空標題過不了 Zod，與其讓整批失敗，先濾掉。
+    const items = (suggestions ?? [])
+      .map((s) => ({ position: s.position, title: s.title.trim() }))
+      .filter((s) => s.title.length > 0);
+    if (items.length === 0) {
+      setAiError("沒有可以採用的建議——標題都空了。");
+      return;
+    }
+    startTransition(async () => {
+      const res = await acceptSubGoals(planId, items);
+      if (res.error) setAiError(res.error);
+      else {
+        setSuggestions(null);
+        setSelectedKey(null);
+      }
+    });
+  }
+
   const board = buildBoard({ planTitle, subGoals, actions, logs, rangeDays, today });
   const blocks = toBlocks(board.cells);
   const selected = selectedKey === null ? null : board.cells.find((c) => cellKey(c) === selectedKey) ?? null;
@@ -115,6 +166,8 @@ export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDay
                     // 其餘退成純色小地圖——6px 的字誰也讀不了，留著只是雜訊。
                     detail={focus === null ? "small" : on ? "large" : "none"}
                     selected={cellKey(cell) === selectedKey}
+                    // 只有還沒填的次目標格子才會拿到建議，已經有內容的永遠拿不到。
+                    suggestion={cell.kind === "subGoal" && !cell.id ? bySlot.get(cell.slot) : undefined}
                     onSelect={() => pick(cell)}
                   />
                 ))}
@@ -132,7 +185,26 @@ export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDay
         給 16px 呼吸；只釘面板、又只離頂 16px 的話，面板會蓋到 header 上面。
       */}
       <div className="flex flex-col gap-3 md:sticky md:top-[76px] md:w-80 md:shrink-0">
-        <Panel cell={selected} planId={planId} logs={logs} today={today} onClose={() => setSelectedKey(null)} />
+        <Panel
+          cell={selected}
+          planId={planId}
+          logs={logs}
+          today={today}
+          suggestion={selected?.kind === "subGoal" && !selected.id ? bySlot.get(selected.slot) : undefined}
+          onEditSuggestion={editSuggestion}
+          onDismissSuggestion={dismissSuggestion}
+          onClose={() => setSelectedKey(null)}
+        />
+
+        <AiPanel
+          emptySlots={emptySlots}
+          suggestions={suggestions}
+          pending={pending}
+          error={aiError}
+          onAsk={ask}
+          onAcceptAll={acceptAll}
+          onCancel={() => { setSuggestions(null); setAiError(null); }}
+        />
 
         <div className="flex flex-col items-center gap-2 md:items-stretch">
           {focus === null ? (
@@ -167,14 +239,79 @@ function formKey(cell: Cell) {
   return `${cellKey(cell)}:${cell.title}:${extra}`;
 }
 
+/* ---------- AI 建議 ---------- */
+
+/**
+ * 建議只是暫時掛在畫面上的東西，沒有進資料庫。生命週期全在 client state：
+ * 產生 → 逐格改字或丟掉 → 全部採用（走 acceptSubGoals）或整批不要。
+ *
+ * 沒有「逐格採用」——挑到一半的狀態沒有意義，八格是一起看才看得出涵蓋面。
+ * 但**逐格改字有**：先採用再改的話，中間會有一段時間資料庫裡放著你不想要的東西。
+ */
+function AiPanel({
+  emptySlots, suggestions, pending, error, onAsk, onAcceptAll, onCancel,
+}: {
+  emptySlots: number;
+  suggestions: Suggestion[] | null;
+  pending: boolean;
+  error: string | null;
+  onAsk: () => void;
+  onAcceptAll: () => void;
+  onCancel: () => void;
+}) {
+  // 八格都填滿就沒有空位可以放建議，這顆按鈕不該出現。
+  if (emptySlots === 0 && !suggestions) return null;
+
+  const btn = "lift inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium cursor-pointer disabled:opacity-50";
+
+  return (
+    <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-4">
+      {suggestions ? (
+        <>
+          <p className="text-xs text-dim leading-relaxed">
+            虛線的 {suggestions.length} 格是 AI 的建議，還沒存進去。
+            點一格可以看它為什麼在那裡，也可以直接改字或丟掉那一格。
+          </p>
+          <div className="flex gap-2">
+            <button type="button" onClick={onAcceptAll} disabled={pending} className={`${btn} bg-accent text-black`}>
+              <Check size={14} />
+              {pending ? "存入中…" : "全部採用"}
+            </button>
+            <button type="button" onClick={onCancel} disabled={pending} className={`${btn} border border-line text-dim hover:text-text`}>
+              不要
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="text-xs text-dim leading-relaxed">
+            想不出來要拆成哪八塊？讓 AI 先給一版，你再改。
+          </p>
+          {/* 免費額度的內容可能被用來改進模型（decisions/0012）。使用者按下去之前該知道。 */}
+          <p className="text-[11px] text-dim/70 leading-relaxed">
+            會把你的核心目標送到 Google 的 AI 服務。
+          </p>
+          <button type="button" onClick={onAsk} disabled={pending} className={`${btn} bg-accent text-black`}>
+            <Sparkles size={14} />
+            {pending ? "AI 想想…" : `幫我想 ${emptySlots} 個次目標`}
+          </button>
+        </>
+      )}
+      {error ? <p role="alert" className="text-xs text-red-600 leading-relaxed">{error}</p> : null}
+    </div>
+  );
+}
+
 function BoardCell({
-  cell, planId, today, detail, selected, onSelect,
+  cell, planId, today, detail, selected, suggestion, onSelect,
 }: {
   cell: Cell;
   planId: string;
   today: string;
   detail: "none" | "small" | "large";
   selected: boolean;
+  /** AI 的建議。有值代表這格是「幽靈」——看得到但還沒進資料庫。 */
+  suggestion?: Suggestion;
   onSelect: () => void;
 }) {
   // 信念型不參與熱力圖：它沒有進度，上色會被誤讀成「還沒做」。
@@ -197,7 +334,9 @@ function BoardCell({
 
   return (
     <div
-      className={`lift relative h-full w-full overflow-hidden border border-line/70 ${
+      className={`lift relative h-full w-full overflow-hidden ${
+        suggestion ? "border-2 border-dashed border-accent/60" : "border border-line/70"
+      } ${
         big ? "rounded-xl md:rounded-2xl" : detail === "none" ? "rounded-sm md:rounded-md" : "rounded-md md:rounded-lg"
       }`}
       style={{
@@ -229,15 +368,16 @@ function BoardCell({
           } ${big ? "p-1.5 md:p-2.5" : "px-1 py-0.5 md:p-1"}`}
         >
           <span className="flex min-w-0 items-start gap-1">
+            {suggestion ? <Sparkles size={big ? 14 : 10} className="mt-px shrink-0 text-accent-text" /> : null}
             {isMantra ? <Quote size={big ? 14 : 10} className="mt-px shrink-0 opacity-50" /> : null}
             <span
-              className={`min-w-0 leading-snug ${clamp} ${
+              className={`min-w-0 leading-snug ${clamp} ${suggestion ? "italic opacity-90" : ""} ${
                 big
                   ? cell.kind === "core" ? "text-[13px] md:text-base font-semibold" : "text-[11px] md:text-sm"
                   : cell.kind === "core" ? "text-[9px] md:text-[11px] font-semibold" : "text-[8px] md:text-[10px]"
               } ${isMantra ? "italic opacity-80" : ""}`}
             >
-              {cell.title}
+              {suggestion?.title ?? cell.title}
             </span>
           </span>
 
@@ -314,8 +454,17 @@ function quickLabel(cell: Extract<Cell, { kind: "action" }>, short = false) {
 }
 
 function Panel({
-  cell, planId, logs, today, onClose,
-}: { cell: Cell | null; planId: string; logs: Log[]; today: string; onClose: () => void }) {
+  cell, planId, logs, today, suggestion, onEditSuggestion, onDismissSuggestion, onClose,
+}: {
+  cell: Cell | null;
+  planId: string;
+  logs: Log[];
+  today: string;
+  suggestion?: Suggestion;
+  onEditSuggestion: (position: number, title: string) => void;
+  onDismissSuggestion: (position: number) => void;
+  onClose: () => void;
+}) {
   return (
     <aside
       // 手機是釘在底部的抽屜（z-30 蓋過格子）；桌機退回一般流排在右欄裡，
@@ -341,7 +490,37 @@ function Panel({
               <X size={16} />
             </button>
           </div>
-          <PanelBody key={formKey(cell)} cell={cell} planId={planId} logs={logs} today={today} />
+          {suggestion ? (
+            // 這一格還沒進資料庫，所以不是 ActionForm——改字只動 client state，
+            // 要等「全部採用」才真的寫。用一般的存檔表單會讓人以為已經存過了。
+            <div className="flex flex-col gap-3">
+              <label className={labelCls}>名稱（可以直接改）</label>
+              <input
+                value={suggestion.title}
+                onChange={(e) => onEditSuggestion(suggestion.position, e.target.value)}
+                placeholder="例如：閱讀"
+                className={inputCls}
+                autoFocus
+              />
+              <p className="flex items-start gap-2 text-sm text-dim leading-relaxed">
+                <Sparkles size={14} className="mt-0.5 shrink-0 text-accent-text" />
+                {suggestion.why}
+              </p>
+              <div className="flex items-center justify-between gap-2 border-t border-line pt-3">
+                <span className="text-xs text-dim/80">改完按右邊的「全部採用」才會存進去。</span>
+                <button
+                  type="button"
+                  onClick={() => onDismissSuggestion(suggestion.position)}
+                  className="shrink-0 flex items-center gap-1.5 text-xs text-dim hover:text-red-600 cursor-pointer"
+                >
+                  <X size={13} />
+                  不要這格
+                </button>
+              </div>
+            </div>
+          ) : (
+            <PanelBody key={formKey(cell)} cell={cell} planId={planId} logs={logs} today={today} />
+          )}
         </>
       )}
     </aside>
