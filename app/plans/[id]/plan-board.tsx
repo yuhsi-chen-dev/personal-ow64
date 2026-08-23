@@ -204,20 +204,22 @@ function BoardCell({
       />
 
       {detail === "none" ? null : (
-        // 標題與百分比是同一個標籤，一起置中——格子是一塊磚，不是一份文件。
-        // 靠上靠左的話，一兩個字的標題會孤零零掛在角落，跟右下角的百分比讀起來像兩件事。
-        // 三個看起來可以隨便寫、其實都不能的值：
+        // 標題與百分比是同一個標籤，垂直置中、水平靠左。
+        // 垂直置中：靠上的話，一兩個字的標題會孤零零掛在角落，跟百分比讀起來像兩件事。
+        // 水平靠左：中文沒有詞距，多行置中每一行的行首都對不齊，參差得很明顯。
+        //
+        // 另外三個看起來可以隨便寫、其實都不能的值：
         // 下緣收在 STRIP.content 而不是打卡條上緣，否則跟進度條那 4px 重疊。
         // safe center 塞得下才置中，塞不下退回靠上——純 center 會上下對稱地裁，
         //   留在畫面上的是標題中間那幾個字，開頭才是認出它是誰的部分。
         // 小格上下內距只有 2px：35px 的格子扣掉框線與 4px 內距，一行標題加一行
         //   數字的餘裕會薄到 3px，換個字型就被切。
         <div
-          className={`pointer-events-none absolute inset-x-0 top-0 flex flex-col items-center [justify-content:safe_center] gap-0.5 overflow-hidden text-center ${
+          className={`pointer-events-none absolute inset-x-0 top-0 flex flex-col items-start [justify-content:safe_center] gap-0.5 overflow-hidden text-left ${
             hasStrip ? STRIP.content : "bottom-0"
           } ${big ? "p-1.5 md:p-2.5" : "px-1 py-0.5 md:p-1"}`}
         >
-          <span className="flex min-w-0 items-start justify-center gap-1">
+          <span className="flex min-w-0 items-start gap-1">
             {isMantra ? <Quote size={big ? 14 : 10} className="mt-px shrink-0 opacity-50" /> : null}
             <span
               className={`min-w-0 leading-snug ${clamp} ${
