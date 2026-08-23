@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft, LineChart, Sunrise } from "lucide-react";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { auth } from "@/auth.ts";
 import { loadPlan } from "@/db/queries.ts";
 import { ThemeToggle } from "@/app/theme-toggle.tsx";
 import { RANGE_CHOICES, rangeDaysInput } from "@/lib/schemas.ts";
@@ -19,9 +20,13 @@ export default async function PlanPage({
   searchParams: Promise<{ days?: string }>;
 }) {
   const { id } = await params;
+  // 沒登入就沒有「自己的表」可看，導回首頁的登入畫面。
+  const userId = (await auth())?.user?.id;
+  if (!userId) redirect("/");
   // 網址是跨信任邊界的輸入，認不得的值退回 30，不要丟 500。見 lib/schemas.ts。
   const rangeDays = rangeDaysInput.parse((await searchParams).days);
-  const data = await loadPlan(id);
+  // 別人的 id 在這裡回 null，跟不存在同一個結果——不要讓人分辨得出來。
+  const data = await loadPlan(userId, id);
   if (!data) notFound();
 
   return (

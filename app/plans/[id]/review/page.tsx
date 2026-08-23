@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { auth } from "@/auth.ts";
 import { loadPlan, loadPlanLogs } from "@/db/queries.ts";
 import { ThemeToggle } from "@/app/theme-toggle.tsx";
 import { ReviewCharts } from "./review-charts.tsx";
@@ -9,12 +10,15 @@ export const dynamic = "force-dynamic";
 
 export default async function ReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const data = await loadPlan(id);
+  const userId = (await auth())?.user?.id;
+  if (!userId) redirect("/");
+
+  const data = await loadPlan(userId, id);
   if (!data) notFound();
 
   // 熱圖要含封存格子的紀錄——收起一格不該讓那段日子從歷史上消失。
   // 底下的趨勢只算還在盤面上的行為，那問的是「現在這張表做得怎樣」。
-  const allLogs = await loadPlanLogs(id);
+  const allLogs = await loadPlanLogs(userId, id);
 
   return (
     <main className="w-full mx-auto max-w-5xl px-4 md:px-6 pb-16 flex flex-col gap-8">
