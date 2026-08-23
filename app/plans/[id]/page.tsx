@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronLeft, LineChart } from "lucide-react";
+import { ChevronLeft, LineChart, Sunrise } from "lucide-react";
 import { notFound } from "next/navigation";
 import { loadPlan } from "@/db/queries.ts";
 import { ThemeToggle } from "@/app/theme-toggle.tsx";
@@ -36,6 +36,14 @@ export default async function PlanPage({
           <ChevronLeft size={16} />
         </Link>
         <h1 className="display min-w-0 flex-1 truncate text-base md:text-xl font-semibold">{data.plan.title}</h1>
+        <Link
+          href={`/plans/${id}/today`}
+          className="lift grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
+          aria-label="今天"
+          title="今天"
+        >
+          <Sunrise size={16} />
+        </Link>
         <Link
           href={`/plans/${id}/review`}
           className="lift grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
