@@ -15,6 +15,13 @@
       "when": 1787407818555,
       "tag": "0001_tracking_taxonomy",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787453684259,
+      "tag": "0002_soft_delete",
+      "breakpoints": true
     }
   ]
 }

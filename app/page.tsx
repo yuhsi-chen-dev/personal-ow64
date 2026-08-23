@@ -1,13 +1,25 @@
 import Link from "next/link";
-import { ArrowRight, Grid3x3, Sparkles, Target } from "lucide-react";
+import { ArrowRight, Grid3x3, Sparkles, Target, Trash2 } from "lucide-react";
 import { listPlans } from "@/db/queries.ts";
-import { createPlan } from "./actions.ts";
+import { createPlan, removePlan } from "./actions.ts";
 import { ActionForm } from "./action-form.tsx";
+import { ConfirmButton } from "./confirm-button.tsx";
 import { ThemeToggle } from "./theme-toggle.tsx";
 import { slotColor } from "@/lib/palette.ts";
 
 // 這頁每次請求都要讀當下的資料，不能在 build 時預渲染。
 export const dynamic = "force-dynamic";
+
+/** 刪掉這份計劃表會失去什麼。整份表是 cascade 真刪，沒有復原入口，所以要把代價講清楚。 */
+function cost({ subGoals, actions, logs }: { subGoals: number; actions: number; logs: number }) {
+  // 是 0 的就不要唸出來——「0 項行為」只是雜訊，讀的人要的是還剩什麼會沒。
+  const parts = [
+    subGoals ? `${subGoals} 個次目標` : "",
+    actions ? `${actions} 項行為` : "",
+    logs ? `${logs} 筆紀錄` : "",
+  ].filter(Boolean);
+  return parts.length === 0 ? "這份還是空的" : `連同 ${parts.join("、")}`;
+}
 
 export default async function Home() {
   const plans = await listPlans();
@@ -67,11 +79,14 @@ export default async function Home() {
         ) : (
           <ul className="flex flex-col gap-2">
             {plans.map((p, i) => (
-              <li key={p.id}>
-                <Link
-                  href={`/plans/${p.id}`}
-                  className="lift group flex items-center gap-3 rounded-2xl border border-line bg-surface px-5 py-4 hover:shadow-[var(--shadow)]"
-                >
+              // 刪除的表單不能包在 Link 裡（互動元素不可巢狀），所以兩者並排。
+              <li
+                key={p.id}
+                // flex-wrap + basis：確認狀態多出一行字，窄螢幕上讓它整組換行，
+                // 而不是把計劃表名稱擠到看不見——正在刪哪一份是最不能被擠掉的資訊。
+                className="lift group flex flex-wrap items-center gap-y-1 rounded-2xl border border-line bg-surface pr-3 hover:shadow-[var(--shadow)]"
+              >
+                <Link href={`/plans/${p.id}`} className="flex min-w-0 grow basis-60 items-center gap-3 px-5 py-4">
                   <span
                     className="grid h-10 w-10 shrink-0 place-items-center rounded-xl"
                     style={{ backgroundColor: slotColor(i, { dim: true }) }}
@@ -81,6 +96,16 @@ export default async function Home() {
                   <span className="min-w-0 flex-1 truncate font-medium">{p.title}</span>
                   <ArrowRight size={16} className="shrink-0 text-dim transition group-hover:translate-x-0.5" />
                 </Link>
+                <ActionForm action={removePlan} className="ml-auto shrink-0 pb-2 sm:pb-0">
+                  <input type="hidden" name="planId" value={p.id} />
+                  <ConfirmButton
+                    className="grid h-9 w-9 place-items-center rounded-full text-dim hover:bg-surface-2 hover:text-red-600 cursor-pointer"
+                    confirmClassName="whitespace-nowrap rounded-full bg-red-600 px-3 py-1.5 text-xs font-medium text-white cursor-pointer"
+                    idle={<Trash2 size={15} />}
+                    confirm="確定刪除"
+                    note={cost(p.counts)}
+                  />
+                </ActionForm>
               </li>
             ))}
           </ul>

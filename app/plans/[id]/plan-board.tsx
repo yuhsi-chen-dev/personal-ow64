@@ -1,16 +1,21 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
-import { Check, Flag, Flame, Grid3x3, Hash, Plus, Quote, Repeat, X } from "lucide-react";
+import { useState } from "react";
+import { Check, Flag, Flame, Grid3x3, Hash, Plus, Quote, Repeat, Trash2, X } from "lucide-react";
 import { ActionForm } from "@/app/action-form.tsx";
-import { logProgress, saveAction, saveSubGoal } from "@/app/actions.ts";
+import { ConfirmButton } from "@/app/confirm-button.tsx";
+import { useToday } from "@/app/use-today.ts";
+import {
+  logProgress, removeActionCell, removeSubGoalCell, renamePlanTitle, saveAction, saveSubGoal,
+} from "@/app/actions.ts";
 import {
   blockOfCell, buildBoard, heat, recentPeriods, streak, toBlocks,
   type BoardAction, type BoardSubGoal, type Cell,
 } from "@/lib/board.ts";
-import { localDay, type Cadence } from "@/lib/day.ts";
+import type { Cadence } from "@/lib/day.ts";
 import { coreFill, slotColor, slotFill } from "@/lib/palette.ts";
 import type { Log, TrackingType } from "@/lib/progress.ts";
+import type { Result } from "@/app/actions.ts";
 
 type Props = {
   planId: string;
@@ -21,11 +26,6 @@ type Props = {
   rangeDays: number;
 };
 
-/** 只有瀏覽器算得準當地日期；SSR 時給空字串，避免 hydration mismatch。 */
-function useToday() {
-  return useSyncExternalStore(() => () => {}, () => localDay(), () => "");
-}
-
 const pct = (p: number | null) => (p === null ? "—" : `${Math.round(p * 100)}%`);
 
 const TYPE = {
@@ -34,6 +34,13 @@ const TYPE = {
   milestone: { label: "里程碑", hint: "做完一次就結束", Icon: Flag },
   mantra: { label: "信念", hint: "銘記在心，不追蹤進度", Icon: Quote },
 } satisfies Record<TrackingType, { label: string; hint: string; Icon: typeof Repeat }>;
+
+/**
+ * 聚焦格子底部那條打卡按鈕的高度。三個地方必須一致：條本身、格子讓出的空間、
+ * 進度條的下緣。手機上聚焦的格子只有 60 幾 px 寬，條裡的字一旦斷行整條就會變兩倍高，
+ * 往上蓋掉標題——所以條是固定高度、字不換行，寧可裁掉也不推擠版面。
+ */
+const STRIP = { height: "h-7", inset: "bottom-7" };
 
 const CADENCE = { daily: "每日", weekly: "每週", monthly: "每月" } satisfies Record<Cadence, string>;
 /** 已完成的說法要用「這一期」而不是頻率本身：「每日已完成」讀起來不像話。 */
@@ -45,17 +52,21 @@ export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDay
   // 兩段式互動：先點區塊讓它長大，再點裡面的格子才開面板。
   // 一步到位的話，手機上剛長大的區塊會立刻被底部面板蓋住。
   const [focus, setFocus] = useState<number | null>(null);
-  const [selected, setSelected] = useState<Cell | null>(null);
+  // 只記「選了哪一格」，每次 render 再從新的 board 撈出那一格。
+  // 存 Cell 物件的話，存檔之後面板拿的還是點下去當時的舊快照——
+  // 輸入框留著舊字，再按一次儲存就把剛改好的內容蓋回去。
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const board = buildBoard({ planTitle, subGoals, actions, logs, rangeDays, today });
   const blocks = toBlocks(board.cells);
+  const selected = selectedKey === null ? null : board.cells.find((c) => cellKey(c) === selectedKey) ?? null;
 
   function pick(cell: Cell) {
     const block = blockOfCell(cell);
     if (block !== focus) {
       setFocus(block);
-      setSelected(null);
+      setSelectedKey(null);
     } else {
-      setSelected(cell);
+      setSelectedKey(cellKey(cell));
     }
   }
 
@@ -94,7 +105,7 @@ export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDay
                     // 沒聚焦時每格都放小字；一旦聚焦，只有放大的那塊有字，
                     // 其餘退成純色小地圖——6px 的字誰也讀不了，留著只是雜訊。
                     detail={focus === null ? "small" : on ? "large" : "none"}
-                    selected={isSame(cell, selected)}
+                    selected={cellKey(cell) === selectedKey}
                     onSelect={() => pick(cell)}
                   />
                 ))}
@@ -111,7 +122,7 @@ export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDay
           ) : (
             <button
               type="button"
-              onClick={() => { setFocus(null); setSelected(null); }}
+              onClick={() => { setFocus(null); setSelectedKey(null); }}
               className="lift inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-dim hover:text-text cursor-pointer"
             >
               <Grid3x3 size={13} />
@@ -121,23 +132,21 @@ export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDay
         </div>
       </section>
 
-      <Panel cell={selected} planId={planId} logs={logs} today={today} onClose={() => setSelected(null)} />
+      <Panel cell={selected} planId={planId} logs={logs} today={today} onClose={() => setSelectedKey(null)} />
     </div>
   );
-}
-
-function isSame(a: Cell, b: Cell | null) {
-  if (!b || a.kind !== b.kind) return false;
-  if (a.kind === "core") return true;
-  if (a.kind === "subGoal" && b.kind === "subGoal") return a.slot === b.slot && a.mirrored === b.mirrored;
-  if (a.kind === "action" && b.kind === "action") return a.slot === b.slot && a.index === b.index;
-  return false;
 }
 
 function cellKey(cell: Cell) {
   if (cell.kind === "core") return "core";
   if (cell.kind === "subGoal") return `sg-${cell.slot}-${cell.mirrored}`;
   return `act-${cell.slot}-${cell.index}`;
+}
+
+/** 表單的重掛載鍵：可編輯的欄位一變，defaultValue 就要跟著換一份新的。 */
+function formKey(cell: Cell) {
+  const extra = cell.kind === "action" ? `${cell.trackingType}:${cell.cadence}:${cell.target}` : "";
+  return `${cellKey(cell)}:${cell.title}:${extra}`;
 }
 
 function BoardCell({
@@ -160,6 +169,9 @@ function BoardCell({
       : slotFill(cell.slot, intensity);
   const ring = cell.kind === "core" ? "var(--accent)" : slotColor(cell.slot);
   const big = detail === "large";
+  // 底部有沒有那條打卡按鈕。有的話，格子的內容區必須在它上面收邊——
+  // 不然標題的第二行會從沒有底色的「記一次」後面透出來。
+  const hasStrip = big && cell.kind === "action" && Boolean(cell.id) && cell.trackingType !== "mantra";
 
   return (
     <div
@@ -175,19 +187,21 @@ function BoardCell({
         type="button"
         onClick={onSelect}
         aria-label={cell.title || "空格子"}
-        className={`absolute inset-x-0 top-0 cursor-pointer ${
-          big && cell.kind === "action" && cell.id && cell.trackingType !== "mantra" ? "bottom-7" : "bottom-0"
-        }`}
+        className={`absolute inset-x-0 top-0 cursor-pointer ${hasStrip ? STRIP.inset : "bottom-0"}`}
       />
 
       {detail === "none" ? null : (
-      <div className={`pointer-events-none absolute inset-0 flex flex-col justify-between ${big ? "p-2 md:p-2.5" : "p-1"}`}>
+      <div
+        className={`pointer-events-none absolute inset-x-0 top-0 flex flex-col justify-between overflow-hidden ${
+          hasStrip ? STRIP.inset : "bottom-0"
+        } ${big ? "p-1.5 md:p-2.5" : "p-1"}`}
+      >
           <span className="flex items-start gap-1">
             {isMantra ? <Quote size={big ? 14 : 10} className="mt-px shrink-0 opacity-50" /> : null}
             <span
               className={`min-w-0 leading-snug ${big ? "line-clamp-4" : "line-clamp-2"} ${
                 big
-                  ? cell.kind === "core" ? "text-sm md:text-base font-semibold" : "text-xs md:text-sm"
+                  ? cell.kind === "core" ? "text-[13px] md:text-base font-semibold" : "text-[11px] md:text-sm"
                   : cell.kind === "core" ? "text-[9px] md:text-[11px] font-semibold" : "text-[8px] md:text-[10px]"
               } ${isMantra ? "italic opacity-80" : ""}`}
             >
@@ -201,8 +215,8 @@ function BoardCell({
             </span>
           ) : null}
 
-          {big && cell.kind === "action" && cell.id && cell.trackingType !== "mantra" && cell.progress !== null ? (
-            <span className="mb-7 h-1 rounded-full bg-black/10">
+          {hasStrip && cell.progress !== null ? (
+            <span className="h-1 rounded-full bg-black/10">
               <span
                 className="block h-full rounded-full transition-[width] duration-500"
                 style={{ width: `${Math.round(cell.progress * 100)}%`, backgroundColor: slotColor(cell.slot) }}
@@ -212,9 +226,7 @@ function BoardCell({
       </div>
       )}
 
-      {big && cell.kind === "action" && cell.id && cell.trackingType !== "mantra" ? (
-        <CheckStrip cell={cell} planId={planId} today={today} />
-      ) : null}
+      {hasStrip ? <CheckStrip cell={cell} planId={planId} today={today} /> : null}
     </div>
   );
 }
@@ -229,7 +241,7 @@ function CheckStrip({
 }: { cell: Extract<Cell, { kind: "action" }>; planId: string; today: string }) {
   const quota = cell.trackingType === "quota";
   return (
-    <ActionForm action={logProgress} compact className="absolute inset-x-0 bottom-0 z-10">
+    <ActionForm action={logProgress} compact className={`absolute inset-x-0 bottom-0 z-10 overflow-hidden ${STRIP.height}`}>
       {({ pending }) => {
         // 樂觀回饋：按下去立刻變成完成的樣子，不等伺服器回來。
         const done = cell.doneNow || (pending && !quota);
@@ -242,13 +254,13 @@ function CheckStrip({
           <button
             type="submit"
             disabled={!today || (cell.doneNow && !quota)}
-            className={`flex w-full items-center justify-center gap-1.5 border-t py-1.5 text-xs font-medium transition active:scale-[.98] ${
+            className={`flex h-full w-full items-center justify-center gap-1 whitespace-nowrap border-t text-[11px] font-medium transition active:scale-[.98] md:gap-1.5 md:text-xs ${
               done ? "border-transparent text-black" : "border-line/60 text-dim hover:text-text cursor-pointer"
             }`}
             style={done ? { backgroundColor: slotColor(cell.slot) } : undefined}
           >
             {quota ? <Plus size={13} strokeWidth={3} /> : <Check size={13} strokeWidth={3} />}
-            {quickLabel({ ...cell, doneNow: done })}
+            {quickLabel({ ...cell, doneNow: done }, true)}
           </button>
           </>
         );
@@ -257,10 +269,12 @@ function CheckStrip({
   );
 }
 
-function quickLabel(cell: Extract<Cell, { kind: "action" }>) {
+/** short 是給格子上那條用的：60 幾 px 放不下「本週已完成」，期間字樣讓給面板。 */
+function quickLabel(cell: Extract<Cell, { kind: "action" }>, short = false) {
   if (cell.trackingType === "quota") return "＋1";
-  if (cell.trackingType === "milestone") return cell.doneNow ? "已完成" : "標記完成";
-  return cell.doneNow ? `${THIS_PERIOD[cell.cadence ?? "daily"]}已完成` : "記一次";
+  if (cell.trackingType === "milestone") return cell.doneNow ? "已完成" : short ? "完成" : "標記完成";
+  if (cell.doneNow) return short ? "已完成" : `${THIS_PERIOD[cell.cadence ?? "daily"]}已完成`;
+  return "記一次";
 }
 
 function Panel({
@@ -288,7 +302,7 @@ function Panel({
               <X size={16} />
             </button>
           </div>
-          <PanelBody key={cellKey(cell)} cell={cell} planId={planId} logs={logs} today={today} />
+          <PanelBody key={formKey(cell)} cell={cell} planId={planId} logs={logs} today={today} />
         </>
       )}
     </aside>
@@ -312,26 +326,42 @@ function PanelBody({ cell, planId, logs, today }: { cell: Cell; planId: string; 
 
   if (cell.kind === "core") {
     return (
-      <div className="flex flex-col gap-3">
-        <p className="text-base font-semibold leading-snug">{cell.title}</p>
+      <div className="flex flex-col gap-4">
+        <ActionForm action={renamePlanTitle} className="flex flex-col gap-2">
+          <input type="hidden" name="planId" value={planId} />
+          <label className={labelCls}>核心目標</label>
+          <textarea
+            name="title"
+            defaultValue={cell.title}
+            rows={2}
+            className={`${inputCls} resize-none`}
+            placeholder="例如：2027 年跑完一場全馬"
+          />
+          <button type="submit" className={submitCls}>儲存</button>
+        </ActionForm>
         <Meter value={cell.progress} color="var(--accent)" />
         <p className="text-xs text-dim">整體進度由底下的行為往上彙總，信念型不列入計算。</p>
-        <p className="text-xs text-dim/70">（改核心目標的名稱還沒做。）</p>
       </div>
     );
   }
 
   if (cell.kind === "subGoal") {
+    // 表單不能巢狀，所以「移除」要跟「儲存」並排成兩個 form，不能塞在裡面。
     return (
-      <ActionForm action={saveSubGoal} className="flex flex-col gap-2">
-        <input type="hidden" name="planId" value={planId} />
-        <input type="hidden" name="position" value={cell.slot} />
-        <label className={labelCls}>名稱</label>
-        <input name="title" defaultValue={cell.title} placeholder="例如：閱讀" className={inputCls} />
-        <Meter value={cell.progress} color={slotColor(cell.slot)} />
-        <p className="text-xs text-dim">底下行為的平均</p>
-        <button type="submit" className={submitCls}>儲存</button>
-      </ActionForm>
+      <div className="flex flex-col gap-4">
+        <ActionForm action={saveSubGoal} className="flex flex-col gap-2">
+          <input type="hidden" name="planId" value={planId} />
+          <input type="hidden" name="position" value={cell.slot} />
+          <label className={labelCls}>名稱</label>
+          <input name="title" defaultValue={cell.title} placeholder="例如：閱讀" className={inputCls} />
+          <Meter value={cell.progress} color={slotColor(cell.slot)} />
+          <p className="text-xs text-dim">底下行為的平均</p>
+          <button type="submit" className={submitCls}>儲存</button>
+        </ActionForm>
+        {cell.id ? (
+          <RemoveCell action={removeSubGoalCell} id={cell.id} planId={planId} note="底下 8 項行為會一起收起來。" />
+        ) : null}
+      </div>
     );
   }
 
@@ -450,7 +480,38 @@ function PanelBody({ cell, planId, logs, today }: { cell: Cell; planId: string; 
       ) : (
         <p className="text-xs text-dim">儲存之後才能開始記錄。</p>
       )}
+
+      {cell.id ? <RemoveCell action={removeActionCell} id={cell.id} planId={planId} /> : null}
     </div>
+  );
+}
+
+/**
+ * 把一格從盤面上拿掉。打過卡的只是封存（紀錄留著），沒打過卡的才真的刪除，
+ * 判斷在 db/writes.ts，見 docs/decisions/0009-soft-delete.md。
+ */
+function RemoveCell({
+  action, id, planId, note,
+}: {
+  action: (prev: Result, form: FormData) => Promise<Result>;
+  id: string;
+  planId: string;
+  note?: string;
+}) {
+  return (
+    <ActionForm action={action} className="relative border-t border-line pt-4">
+      <input type="hidden" name="id" value={id} />
+      <input type="hidden" name="planId" value={planId} />
+      <ConfirmButton
+        className="flex items-center gap-1.5 text-xs text-dim hover:text-red-600 cursor-pointer"
+        confirmClassName="flex items-center gap-1.5 text-xs font-medium text-red-600 cursor-pointer"
+        idle={<><Trash2 size={13} />移除這一格</>}
+        confirm={<><Trash2 size={13} />確定移除</>}
+      />
+      <p className="mt-1.5 text-[11px] leading-relaxed text-dim/80">
+        {note}打過卡的話只會從盤面上收起來，紀錄不會消失。
+      </p>
+    </ActionForm>
   );
 }
 

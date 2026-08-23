@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { pgTable, text, integer, real, timestamp, date, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 // 一份計劃表。title 即核心目標。
@@ -16,9 +17,15 @@ export const subGoals = pgTable(
     planId: text("plan_id").notNull().references(() => plans.id, { onDelete: "cascade" }),
     position: integer("position").notNull(),
     title: text("title").notNull(),
+    // 封存＝盤面上看不見，但底下的紀錄留著。硬刪只留給從沒打過卡的格子。
+    // 見 docs/decisions/0009-soft-delete.md。
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
   },
-  // 一個 slot 只能有一個次目標；upsert 靠這個約束。
-  (t) => [uniqueIndex("sub_goals_plan_position_idx").on(t.planId, t.position)],
+  // 一個 slot 只能有一個「還在用」的次目標；upsert 靠這個約束。
+  // 條件式唯一：封存過的列不佔位置，重填同一格會拿到全新的 id（不會撿回舊紀錄）。
+  (t) => [
+    uniqueIndex("sub_goals_plan_position_idx").on(t.planId, t.position).where(sql`archived_at is null`),
+  ],
 );
 
 // 具體行為，唯一可被追蹤的單位，一份計劃表最多 64 列。
@@ -33,8 +40,11 @@ export const actions = pgTable(
     trackingType: text("tracking_type", { enum: ["habit", "quota", "milestone", "mantra"] }).notNull(),
     cadence: text("cadence", { enum: ["daily", "weekly", "monthly"] }), // 僅 habit 型使用
     target: integer("target"), // 僅 quota 型使用
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
   },
-  (t) => [uniqueIndex("actions_sub_goal_position_idx").on(t.subGoalId, t.position)],
+  (t) => [
+    uniqueIndex("actions_sub_goal_position_idx").on(t.subGoalId, t.position).where(sql`archived_at is null`),
+  ],
 );
 
 // 執行紀錄。三種 trackingType 共用這一張表，語意差異見 lib/progress.ts。
