@@ -123,25 +123,34 @@ export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDay
           })}
         </div>
 
-        <div className="mt-4 flex flex-col items-center gap-2">
+      </section>
+
+      {/*
+        右欄整根 sticky，而不是只有面板 sticky——「回到全覽」跟著面板一起釘住，
+        滑到哪都按得到，不用捲回格子底下。
+        top 要讓開上面那條 sticky header（py-3 + h-9 + 框線 ≈ 61px），
+        給 16px 呼吸；只釘面板、又只離頂 16px 的話，面板會蓋到 header 上面。
+      */}
+      <div className="flex flex-col gap-3 md:sticky md:top-[76px] md:w-80 md:shrink-0">
+        <Panel cell={selected} planId={planId} logs={logs} today={today} onClose={() => setSelectedKey(null)} />
+
+        <div className="flex flex-col items-center gap-2 md:items-stretch">
           {focus === null ? (
-            <p className="text-center text-xs text-dim">
+            <p className="text-center text-xs text-dim md:text-left">
               顏色深淺是最近 {rangeDays} 天的達成率，每個次目標有自己的顏色。點任一區塊放大。
             </p>
           ) : (
             <button
               type="button"
               onClick={() => { setFocus(null); setSelectedKey(null); }}
-              className="lift inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-dim hover:text-text cursor-pointer"
+              className="lift inline-flex items-center justify-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-dim hover:text-text cursor-pointer"
             >
               <Grid3x3 size={13} />
               回到全覽
             </button>
           )}
         </div>
-      </section>
-
-      <Panel cell={selected} planId={planId} logs={logs} today={today} onClose={() => setSelectedKey(null)} />
+      </div>
     </div>
   );
 }
@@ -309,8 +318,11 @@ function Panel({
 }: { cell: Cell | null; planId: string; logs: Log[]; today: string; onClose: () => void }) {
   return (
     <aside
+      // 手機是釘在底部的抽屜（z-30 蓋過格子）；桌機退回一般流排在右欄裡，
+      // z 也要跟著退回去——不加 md:z-auto 的話 z-30 會贏過 header 的 z-20，
+      // 面板就疊到標題列上面了。sticky 交給外層那一欄，這裡不要再釘一次。
       className="fixed inset-x-0 bottom-0 z-30 max-h-[72vh] overflow-y-auto border-t border-line bg-surface p-5
-                 md:static md:top-4 md:sticky md:max-h-none md:w-80 md:shrink-0 md:rounded-2xl md:border
+                 md:static md:z-auto md:max-h-none md:w-full md:rounded-2xl md:border
                  shadow-[var(--shadow)]"
     >
       {cell === null ? (
