@@ -107,3 +107,133 @@ ${already}
 
 每一塊附一句 why，說明為什麼這一塊值得佔掉八分之一的版面。寫給填表的人看，不是寫給我看。`;
 }
+
+/* ---------- 第二步：某個次目標底下的 8 項行為 ---------- */
+
+/**
+ * 模型回傳的一項行為建議。
+ *
+ * 刻意寫成**扁平**的：`cadence` 與 `target` 各自只對一種 trackingType 有意義，
+ * 但 Gemini 吃的 JSON Schema 子集不含 `oneOf` 的可靠支援，硬要 discriminated union
+ * 是在賭。所以模型端收寬的，收下來之後用 normalizeAction 收斂，
+ * 最後寫入時再過 lib/schemas.ts 的 actionInput——那才是真正的關卡。
+ */
+export const actionSuggestion = z.object({
+  title: z.string().trim().min(1).max(60),
+  trackingType: z.enum(["habit", "quota", "milestone", "mantra"]),
+  cadence: z.enum(["daily", "weekly", "monthly"]).nullish(),
+  target: z.number().int().positive().nullish(),
+  why: z.string().trim().min(1).max(120),
+});
+
+export const actionSuggestions = z.object({ actions: z.array(actionSuggestion) });
+
+export type ActionSuggestion = z.infer<typeof actionSuggestion>;
+
+/** 收斂後的形狀，欄位組合已經跟 trackingType 對齊。 */
+export type NormalizedAction = {
+  title: string;
+  why: string;
+  trackingType: ActionSuggestion["trackingType"];
+  cadence: "daily" | "weekly" | "monthly" | null;
+  target: number | null;
+};
+
+/**
+ * 把模型給的扁平資料收斂成合法的組合。收不了的回 null，由呼叫端丟掉。
+ *
+ * 為什麼要有這一步：模型很容易給出「里程碑 + 每日」這種矛盾組合，
+ * 直接送進 actionInput 會整批驗證失敗。與其讓一顆壞蘋果毀掉整籃，
+ * 不如在這裡把多餘的欄位清掉——那些欄位對該型態本來就沒有意義。
+ *
+ * **唯一收不了的是「累計型沒給目標數量」**：那個數字沒辦法猜，
+ * 猜錯會讓進度百分比從第一天就是錯的（見 decisions/0008）。
+ */
+export function normalizeAction(s: ActionSuggestion): NormalizedAction | null {
+  const base = { title: s.title, why: s.why };
+  switch (s.trackingType) {
+    case "habit":
+      // 頻率沒給就當每日。這個預設是安全的：分母變大只會讓進度看起來保守。
+      return { ...base, trackingType: "habit", cadence: s.cadence ?? "daily", target: null };
+    case "quota":
+      if (!s.target || s.target <= 0) return null;
+      return { ...base, trackingType: "quota", cadence: null, target: s.target };
+    case "milestone":
+    case "mantra":
+      return { ...base, trackingType: s.trackingType, cadence: null, target: null };
+  }
+}
+
+/** 給模型的輸出格式。理由與 subGoalResponseSchema 相同：手寫，只用 Gemini 支援的關鍵字。 */
+export const actionResponseSchema = {
+  type: "object",
+  properties: {
+    actions: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "具體行為，10 到 20 個字，看得出今天有沒有做到" },
+          trackingType: {
+            type: "string",
+            enum: ["habit", "quota", "milestone", "mantra"],
+            description: "habit=固定頻率重複做；quota=朝一個總量前進；milestone=做完一次就結束；mantra=銘記在心不追蹤",
+          },
+          cadence: { type: "string", enum: ["daily", "weekly", "monthly"], description: "只有 habit 要填" },
+          target: { type: "integer", description: "只有 quota 要填，是一個正整數的總量" },
+          why: { type: "string", description: "一句話說明這一項為什麼有用" },
+        },
+        required: ["title", "trackingType", "why"],
+        propertyOrdering: ["title", "trackingType", "cadence", "target", "why"],
+      },
+    },
+  },
+  required: ["actions"],
+} as const;
+
+/**
+ * 給模型的提示詞。四種追蹤方式的定義照抄 decisions/0008——
+ * 那份定義是這個 app 的核心規則，不能在這裡自己發明另一套說法。
+ *
+ * 特別要求「不要八項都是習慣」：信念型是曼陀羅裡最容易被忽略、
+ * 但價值最高的一格。不講的話模型會給你八個打卡項目。
+ */
+export function actionPrompt(input: {
+  coreGoal: string;
+  subGoal: string;
+  existing: { position: number; title: string }[];
+  need: number;
+}): string {
+  const { coreGoal, subGoal, existing, need } = input;
+  const already = existing.length
+    ? `\n這一塊已經有這幾項了，不要重複：\n${existing.map((e) => `- ${e.title}`).join("\n")}\n`
+    : "";
+
+  return `你在幫人填曼陀羅計劃表（Mandal-Art）。核心目標拆成 8 個次目標，
+每個次目標再拆成 8 項具體行為。
+
+核心目標：${coreGoal}
+現在要填的次目標：${subGoal}
+${already}
+請提出 ${need} 項具體行為。每一項都要標上追蹤方式，四選一：
+
+- **habit** 固定頻率重複做的事。要附 cadence：daily／weekly／monthly。
+  例：「每週跑一次 15 公里以上」→ habit + weekly。
+- **quota** 朝一個總量前進。要附 target（正整數）。
+  例：「累積跑滿 800 公里」→ quota + target 800。
+- **milestone** 做完一次就結束。
+  例：「完成一次半程馬拉松」→ milestone。
+- **mantra** 銘記在心、不追蹤進度的原則。
+  例：「痛就停，不要逞強」→ mantra。
+
+規則：
+
+- 行為要**具體到今天結束時，你能明確回答有沒有做到**。
+  「加強核心」不行，「做 3 組棒式各 60 秒」可以。
+- **不要八項都是習慣。** 八項裡至少要有一項 mantra——那是這一塊的原則，
+  是做決定時的依據，不是待辦事項。也想想有沒有適合的里程碑或累計目標。
+- 名稱 10 到 20 個字，短到能塞進一個小格子。
+- **用跟核心目標同一種語言回答。**
+
+每一項附一句 why，寫給填表的人看。`;
+}

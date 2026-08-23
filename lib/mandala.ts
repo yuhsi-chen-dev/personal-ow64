@@ -72,3 +72,10 @@ export function blockIndexOfSlot(slot: number): number {
   return r * 3 + c;
 }
 
+
+/** 外圍區塊編號反查它屬於哪個次目標 slot。中央區塊（沒有行為）回 null。 */
+export function slotOfBlock(block: number): number | null {
+  if (block === CORE_BLOCK) return null;
+  for (let slot = 0; slot < SLOTS; slot++) if (blockIndexOfSlot(slot) === block) return slot;
+  return null;
+}
