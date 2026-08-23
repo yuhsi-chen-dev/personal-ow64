@@ -24,6 +24,7 @@
 | `AUTH_SECRET` | session cookie 的簽章金鑰。`npx auth secret` 產生，**production 用跟本機不一樣的那一組** |
 | `AUTH_GOOGLE_ID` | Google OAuth Client ID |
 | `AUTH_GOOGLE_SECRET` | Google OAuth Client Secret |
+| `GEMINI_API_KEY` | Google AI Studio 的 API key，AI 建議功能用。沒設的話那顆按鈕會回「這台機器還沒設定 AI 的金鑰」，其餘功能不受影響 |
 
 `AUTH_URL` 不用設，Auth.js 在 Vercel 上會自己認出網域。
 
@@ -116,6 +117,8 @@ DATABASE_URL='<production 的連線字串>' npm run db:migrate
 - **資料隔離**：換一個 Google 帳號登入，確認看不到前一個帳號的計劃表
 - 瀏覽器 console 沒有錯誤
 - 手機上實際開一次今天頁（那才是它存在的理由）
+- **AI 建議按一次**，順便量生成花多久。Vercel 的 function 有執行時間上限，
+  本機沒有——這是唯一只會在線上出現的失敗（`decisions/0012`）。
 
 **第一個請求會慢幾秒是正常的。** Neon 免費方案閒置會 suspend，那是睡著不是刪資料，
 下次請求自己醒（`decisions/0005`）。
