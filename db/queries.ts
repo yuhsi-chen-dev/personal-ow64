@@ -8,8 +8,12 @@ import { actions, logs, plans, subGoals } from "./schema.ts";
  * 這裡**不濾封存**：刪整份計劃表是 cascade 真刪，封存的次目標與行為也一起走。
  * 確認畫面要講的是真正的代價，不是盤面上看得到的部分。
  */
-export async function listPlans() {
-  const rows = await getDb().select().from(plans).orderBy(asc(plans.createdAt));
+export async function listPlans(userId: string) {
+  const rows = await getDb()
+    .select()
+    .from(plans)
+    .where(eq(plans.userId, userId))
+    .orderBy(asc(plans.createdAt));
   if (rows.length === 0) return [];
 
   const counts = await getDb()
@@ -22,6 +26,9 @@ export async function listPlans() {
     .from(subGoals)
     .leftJoin(actions, eq(actions.subGoalId, subGoals.id))
     .leftJoin(logs, eq(logs.actionId, actions.id))
+    // 只數自己的。不限制的話會把別人的計劃表也數進來——雖然數字不會被顯示，
+    // 但查詢本身就不該碰到不屬於這個使用者的列。
+    .where(inArray(subGoals.planId, rows.map((p) => p.id)))
     .groupBy(subGoals.planId);
 
   const byPlan = new Map(counts.map(({ planId, ...n }) => [planId, n]));
@@ -41,8 +48,12 @@ export type LoadedPlan = Awaited<ReturnType<typeof loadPlan>>;
  * 已封存的次目標與行為一律不回傳——盤面上它們就是不存在。
  * 它們的紀錄還在資料庫裡，要看的話走 loadPlanLogs。
  */
-export async function loadPlan(planId: string) {
-  const [plan] = await getDb().select().from(plans).where(eq(plans.id, planId));
+export async function loadPlan(userId: string, planId: string) {
+  const [plan] = await getDb()
+    .select()
+    .from(plans)
+    .where(and(eq(plans.id, planId), eq(plans.userId, userId)));
+  // 不是他的就回 null，跟「不存在」同一個結果——不要讓呼叫端有辦法分辨這兩者。
   if (!plan) return null;
 
   const sgs = await getDb()
@@ -66,11 +77,12 @@ export async function loadPlan(planId: string) {
  * 這份計劃表的**所有**打卡紀錄，含已封存的次目標與行為。
  * 回顧頁的年度熱圖用這個：封存一格不該讓那段日子從歷史上消失。
  */
-export async function loadPlanLogs(planId: string) {
+export async function loadPlanLogs(userId: string, planId: string) {
   return getDb()
     .select({ actionId: logs.actionId, day: logs.day, occurredAt: logs.occurredAt, value: logs.value })
     .from(logs)
     .innerJoin(actions, eq(actions.id, logs.actionId))
     .innerJoin(subGoals, eq(subGoals.id, actions.subGoalId))
-    .where(eq(subGoals.planId, planId));
+    .innerJoin(plans, eq(plans.id, subGoals.planId))
+    .where(and(eq(subGoals.planId, planId), eq(plans.userId, userId)));
 }

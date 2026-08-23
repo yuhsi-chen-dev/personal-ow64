@@ -1,7 +1,9 @@
 import Link from "next/link";
-import { ArrowRight, Grid3x3, Sparkles, Target, Trash2 } from "lucide-react";
+import { ArrowRight, Grid3x3, LogIn, LogOut, Sparkles, Target, Trash2 } from "lucide-react";
+import { auth } from "@/auth.ts";
 import { listPlans } from "@/db/queries.ts";
 import { createPlan, removePlan } from "./actions.ts";
+import { signInWithGoogle, signOutOfApp } from "./auth-actions.ts";
 import { ActionForm } from "./action-form.tsx";
 import { ConfirmButton } from "./confirm-button.tsx";
 import { ThemeToggle } from "./theme-toggle.tsx";
@@ -22,7 +24,10 @@ function cost({ subGoals, actions, logs }: { subGoals: number; actions: number; 
 }
 
 export default async function Home() {
-  const plans = await listPlans();
+  const session = await auth();
+  const userId = session?.user?.id;
+  // 沒登入就不查資料庫。這頁在登出狀態下是張門面，不是空的清單。
+  const plans = userId ? await listPlans(userId) : [];
 
   return (
     <main className="w-full mx-auto max-w-3xl px-6 py-10 md:py-16 flex flex-col gap-12">
@@ -43,9 +48,25 @@ export default async function Home() {
             然後每天把它們一格一格填滿。
           </p>
         </div>
-        <ThemeToggle />
+        <div className="flex shrink-0 items-center gap-2">
+          {userId ? (
+            <form action={signOutOfApp}>
+              <button
+                type="submit"
+                title={session?.user?.email ?? undefined}
+                className="lift inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-dim hover:text-text cursor-pointer"
+              >
+                <LogOut size={13} />
+                登出
+              </button>
+            </form>
+          ) : null}
+          <ThemeToggle />
+        </div>
       </header>
 
+      {userId ? (
+      <>
       <section className="rounded-2xl border border-line bg-surface p-6 shadow-[var(--shadow)]">
         <ActionForm action={createPlan} className="flex flex-col gap-3">
           <label htmlFor="title" className="flex items-center gap-2 text-sm font-medium">
@@ -111,6 +132,25 @@ export default async function Home() {
           </ul>
         )}
       </section>
+      </>
+      ) : (
+        <section className="rounded-2xl border border-line bg-surface p-8 shadow-[var(--shadow)] flex flex-col items-start gap-4">
+          <h2 className="text-lg font-medium">先登入，才有你自己的表</h2>
+          <p className="text-sm text-dim leading-relaxed">
+            每個人的計劃表只有自己看得到。登入之後就能建立第一張 9×9，
+            開始把一個目標拆成 8 個次目標、64 個具體行為。
+          </p>
+          <form action={signInWithGoogle}>
+            <button
+              type="submit"
+              className="lift inline-flex items-center gap-2 rounded-xl bg-accent px-5 py-2.5 font-medium text-black cursor-pointer"
+            >
+              <LogIn size={16} />
+              用 Google 登入
+            </button>
+          </form>
+        </section>
+      )}
     </main>
   );
 }

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft, Grid3x3 } from "lucide-react";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { auth } from "@/auth.ts";
 import { loadPlan } from "@/db/queries.ts";
 import { ThemeToggle } from "@/app/theme-toggle.tsx";
 import { TodayMap } from "./today-map.tsx";
@@ -9,7 +10,10 @@ export const dynamic = "force-dynamic";
 
 export default async function TodayPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const data = await loadPlan(id);
+  const userId = (await auth())?.user?.id;
+  if (!userId) redirect("/");
+
+  const data = await loadPlan(userId, id);
   if (!data) notFound();
 
   return (
