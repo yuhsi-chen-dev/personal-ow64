@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { layout, CORE_COORD, SIZE, SLOTS, actionCoord, subGoalCoordInCore } from "./mandala.ts";
+import { CORE_BLOCK, CORE_COORD, SIZE, SLOTS, actionCoord, blockIndexOfSlot, layout, slotOfBlock, subGoalCoordInCore } from "./mandala.ts";
 import { actionProgress, rollup, type Log } from "./progress.ts";
 import { localDay, shiftDay, lastDays } from "./day.ts";
 
@@ -97,4 +97,12 @@ test("shiftDay 跨月、跨年、閏日都要對", () => {
 
 test("lastDays 含今天、由舊到新", () => {
   assert.deepEqual(lastDays("2026-03-02", 4), ["2026-02-27", "2026-02-28", "2026-03-01", "2026-03-02"]);
+});
+
+test("區塊編號與 slot 互為反函式，中央區塊沒有 slot", () => {
+  for (let slot = 0; slot < SLOTS; slot++) {
+    assert.equal(slotOfBlock(blockIndexOfSlot(slot)), slot);
+  }
+  assert.equal(slotOfBlock(CORE_BLOCK), null);
+  assert.equal(slotOfBlock(99), null, "不存在的區塊也不能回傳一個看起來合理的 slot");
 });

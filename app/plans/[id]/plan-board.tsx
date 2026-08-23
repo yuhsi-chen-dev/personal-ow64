@@ -6,14 +6,17 @@ import { ActionForm } from "@/app/action-form.tsx";
 import { ConfirmButton } from "@/app/confirm-button.tsx";
 import { useToday } from "@/app/use-today.ts";
 import {
-  acceptSubGoals, logProgress, removeActionCell, removeSubGoalCell, renamePlanTitle,
-  saveAction, saveSubGoal,
+  acceptActions, acceptSubGoals, logProgress, removeActionCell, removeSubGoalCell,
+  renamePlanTitle, saveAction, saveSubGoal,
 } from "@/app/actions.ts";
-import { suggestSubGoals, type Suggestion } from "@/app/ai-actions.ts";
+import {
+  suggestActions, suggestSubGoals, type ActionSuggestionAt, type Suggestion,
+} from "@/app/ai-actions.ts";
 import {
   blockOfCell, buildBoard, heat, recentPeriods, streak, toBlocks,
   type BoardAction, type BoardSubGoal, type Cell,
 } from "@/lib/board.ts";
+import { SLOTS, slotOfBlock } from "@/lib/mandala.ts";
 import type { Cadence } from "@/lib/day.ts";
 import { coreFill, slotColor, slotFill } from "@/lib/palette.ts";
 import type { Log, TrackingType } from "@/lib/progress.ts";
@@ -58,6 +61,17 @@ const CADENCE = { daily: "每日", weekly: "每週", monthly: "每月" } satisfi
 const THIS_PERIOD = { daily: "今天", weekly: "本週", monthly: "本月" } satisfies Record<Cadence, string>;
 const PERIOD_UNIT = { daily: "天", weekly: "週", monthly: "個月" } satisfies Record<Cadence, string>;
 
+/** 畫面上那些還沒進資料庫的格子。兩種建議共用的最小形狀。 */
+type Ghost = Suggestion | ActionSuggestionAt;
+
+/**
+ * 一批還沒採用的建議。同一時間只會有一種——聚焦哪一塊就決定了要提議什麼，
+ * 所以拆成兩份 state 只是把「不能同時存在」這條不變式交給自己維護。
+ */
+type Draft =
+  | { kind: "subGoal"; items: Suggestion[] }
+  | { kind: "action"; slot: number; subGoalId: string; items: ActionSuggestionAt[] };
+
 export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDays }: Props) {
   const today = useToday();
   // 兩段式互動：先點區塊讓它長大，再點裡面的格子才開面板。
@@ -67,50 +81,88 @@ export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDay
   // 存 Cell 物件的話，存檔之後面板拿的還是點下去當時的舊快照——
   // 輸入框留著舊字，再按一次儲存就把剛改好的內容蓋回去。
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  // AI 的建議只活在這裡，沒有寫進資料庫。使用者按下「採用」才走 acceptSubGoals。
-  const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null);
+  // AI 的建議只活在這裡，沒有寫進資料庫。按下「採用」才走 acceptSubGoals／acceptActions。
+  // 用一個聯集而不是兩份 state：同一時間只可能在看一種建議，
+  // 拆成兩份就得自己維護「不能同時存在」這條不變式。
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const bySlot = new Map((suggestions ?? []).map((x) => [x.position, x]));
-  const emptySlots = 8 - subGoals.length;
+
+  // 聚焦在哪一塊，決定 AI 面板要提議什麼。中央區塊（slotOfBlock 回 null）沒有行為可提。
+  const focusSlot = focus === null ? null : slotOfBlock(focus);
+  const focusSubGoal = focusSlot === null ? undefined : subGoals.find((s) => s.position === focusSlot);
+  const freeSubGoals = SLOTS - subGoals.length;
+  const freeActions = focusSubGoal ? SLOTS - actions.filter((a) => a.subGoalId === focusSubGoal.id).length : 0;
+
+  /** 這一格上面有沒有掛著建議。已經有內容的格子永遠拿不到。 */
+  function ghostFor(cell: Cell): Ghost | undefined {
+    if (!draft) return undefined;
+    if (draft.kind === "subGoal") {
+      return cell.kind === "subGoal" && !cell.id ? draft.items.find((x) => x.position === cell.slot) : undefined;
+    }
+    return cell.kind === "action" && !cell.id && cell.slot === draft.slot
+      ? draft.items.find((x) => x.position === cell.index)
+      : undefined;
+  }
 
   function ask() {
     setAiError(null);
     startTransition(async () => {
+      if (focusSubGoal && focusSlot !== null) {
+        const res = await suggestActions(planId, focusSlot);
+        if (res.error) setAiError(res.error);
+        setDraft(res.suggestions ? { kind: "action", slot: focusSlot, subGoalId: focusSubGoal.id, items: res.suggestions } : null);
+        return;
+      }
       const res = await suggestSubGoals(planId);
       if (res.error) setAiError(res.error);
-      setSuggestions(res.suggestions ?? null);
+      setDraft(res.suggestions ? { kind: "subGoal", items: res.suggestions } : null);
     });
   }
 
   /** 改建議的文字。只動 client state——這些東西還沒進資料庫。 */
-  function editSuggestion(position: number, title: string) {
-    setSuggestions((cur) => (cur ?? []).map((x) => (x.position === position ? { ...x, title } : x)));
+  function editDraft(position: number, title: string) {
+    setDraft((cur) =>
+      cur === null ? null : { ...cur, items: cur.items.map((x) => (x.position === position ? { ...x, title } : x)) } as Draft,
+    );
   }
 
   /** 不要這一格。丟掉就是丟掉，不會留一個空殼在畫面上。 */
-  function dismissSuggestion(position: number) {
-    setSuggestions((cur) => {
-      const left = (cur ?? []).filter((x) => x.position !== position);
-      return left.length ? left : null;
+  function dismissDraft(position: number) {
+    setDraft((cur) => {
+      if (cur === null) return null;
+      const items = cur.items.filter((x) => x.position !== position);
+      return items.length ? ({ ...cur, items } as Draft) : null;
     });
     setSelectedKey(null);
   }
 
   function acceptAll() {
+    if (!draft) return;
     // 使用者可能把某一格改成空白。空標題過不了 Zod，與其讓整批失敗，先濾掉。
-    const items = (suggestions ?? [])
-      .map((s) => ({ position: s.position, title: s.title.trim() }))
-      .filter((s) => s.title.length > 0);
-    if (items.length === 0) {
+    const kept = draft.items.map((x) => ({ ...x, title: x.title.trim() })).filter((x) => x.title.length > 0);
+    if (kept.length === 0) {
       setAiError("沒有可以採用的建議——標題都空了。");
       return;
     }
     startTransition(async () => {
-      const res = await acceptSubGoals(planId, items);
+      const res =
+        draft.kind === "subGoal"
+          ? await acceptSubGoals(planId, kept.map((x) => ({ position: x.position, title: x.title })))
+          : await acceptActions(
+              planId,
+              draft.subGoalId,
+              (kept as ActionSuggestionAt[]).map((x) => ({
+                position: x.position,
+                title: x.title,
+                trackingType: x.trackingType,
+                cadence: x.cadence,
+                target: x.target,
+              })),
+            );
       if (res.error) setAiError(res.error);
       else {
-        setSuggestions(null);
+        setDraft(null);
         setSelectedKey(null);
       }
     });
@@ -125,6 +177,9 @@ export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDay
     if (block !== focus) {
       setFocus(block);
       setSelectedKey(null);
+      // 換一塊看就換一種脈絡，上一批建議留著只會擋住新的格子。
+      setDraft(null);
+      setAiError(null);
     } else {
       setSelectedKey(cellKey(cell));
     }
@@ -167,7 +222,7 @@ export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDay
                     detail={focus === null ? "small" : on ? "large" : "none"}
                     selected={cellKey(cell) === selectedKey}
                     // 只有還沒填的次目標格子才會拿到建議，已經有內容的永遠拿不到。
-                    suggestion={cell.kind === "subGoal" && !cell.id ? bySlot.get(cell.slot) : undefined}
+                    suggestion={ghostFor(cell)}
                     onSelect={() => pick(cell)}
                   />
                 ))}
@@ -190,20 +245,21 @@ export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDay
           planId={planId}
           logs={logs}
           today={today}
-          suggestion={selected?.kind === "subGoal" && !selected.id ? bySlot.get(selected.slot) : undefined}
-          onEditSuggestion={editSuggestion}
-          onDismissSuggestion={dismissSuggestion}
+          suggestion={selected ? ghostFor(selected) : undefined}
+          onEditSuggestion={editDraft}
+          onDismissSuggestion={dismissDraft}
           onClose={() => setSelectedKey(null)}
         />
 
         <AiPanel
-          emptySlots={emptySlots}
-          suggestions={suggestions}
+          // 聚焦在有次目標的那一塊 → 提議行為；沒聚焦 → 提議次目標。
+          target={focusSubGoal ? { kind: "action", name: focusSubGoal.title, free: freeActions } : { kind: "subGoal", free: freeSubGoals }}
+          draft={draft}
           pending={pending}
           error={aiError}
           onAsk={ask}
           onAcceptAll={acceptAll}
-          onCancel={() => { setSuggestions(null); setAiError(null); }}
+          onCancel={() => { setDraft(null); setAiError(null); }}
         />
 
         <div className="flex flex-col items-center gap-2 md:items-stretch">
@@ -249,10 +305,10 @@ function formKey(cell: Cell) {
  * 但**逐格改字有**：先採用再改的話，中間會有一段時間資料庫裡放著你不想要的東西。
  */
 function AiPanel({
-  emptySlots, suggestions, pending, error, onAsk, onAcceptAll, onCancel,
+  target, draft, pending, error, onAsk, onAcceptAll, onCancel,
 }: {
-  emptySlots: number;
-  suggestions: Suggestion[] | null;
+  target: { kind: "subGoal"; free: number } | { kind: "action"; name: string; free: number };
+  draft: Draft | null;
   pending: boolean;
   error: string | null;
   onAsk: () => void;
@@ -260,16 +316,17 @@ function AiPanel({
   onCancel: () => void;
 }) {
   // 八格都填滿就沒有空位可以放建議，這顆按鈕不該出現。
-  if (emptySlots === 0 && !suggestions) return null;
+  if (target.free === 0 && !draft) return null;
+  const noun = target.kind === "subGoal" ? "次目標" : "行為";
 
   const btn = "lift inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium cursor-pointer disabled:opacity-50";
 
   return (
     <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-4">
-      {suggestions ? (
+      {draft ? (
         <>
           <p className="text-xs text-dim leading-relaxed">
-            虛線的 {suggestions.length} 格是 AI 的建議，還沒存進去。
+            虛線的 {draft.items.length} 格是 AI 的建議，還沒存進去。
             點一格可以看它為什麼在那裡，也可以直接改字或丟掉那一格。
           </p>
           <div className="flex gap-2">
@@ -285,15 +342,17 @@ function AiPanel({
       ) : (
         <>
           <p className="text-xs text-dim leading-relaxed">
-            想不出來要拆成哪八塊？讓 AI 先給一版，你再改。
+            {target.kind === "subGoal"
+              ? "想不出來要拆成哪八塊？讓 AI 先給一版，你再改。"
+              : `「${target.name}」底下要做什麼？讓 AI 先給一版，你再改。`}
           </p>
           {/* 免費額度的內容可能被用來改進模型（decisions/0012）。使用者按下去之前該知道。 */}
           <p className="text-[11px] text-dim/70 leading-relaxed">
-            會把你的核心目標送到 Google 的 AI 服務。
+            會把你的核心目標{target.kind === "action" ? "與這一塊的名稱" : ""}送到 Google 的 AI 服務。
           </p>
           <button type="button" onClick={onAsk} disabled={pending} className={`${btn} bg-accent text-black`}>
             <Sparkles size={14} />
-            {pending ? "AI 想想…" : `幫我想 ${emptySlots} 個次目標`}
+            {pending ? "AI 想想…" : `幫我想 ${target.free} ${target.kind === "subGoal" ? "個" : "項"}${noun}`}
           </button>
         </>
       )}
@@ -311,7 +370,7 @@ function BoardCell({
   detail: "none" | "small" | "large";
   selected: boolean;
   /** AI 的建議。有值代表這格是「幽靈」——看得到但還沒進資料庫。 */
-  suggestion?: Suggestion;
+  suggestion?: Ghost;
   onSelect: () => void;
 }) {
   // 信念型不參與熱力圖：它沒有進度，上色會被誤讀成「還沒做」。
@@ -352,9 +411,10 @@ function BoardCell({
       />
 
       {detail === "none" ? null : (
-        // 標題與百分比是同一個標籤，垂直置中、水平靠左。
-        // 垂直置中：靠上的話，一兩個字的標題會孤零零掛在角落，跟百分比讀起來像兩件事。
-        // 水平靠左：中文沒有詞距，多行置中每一行的行首都對不齊，參差得很明顯。
+        // 標題與百分比是同一個標籤，上下左右都置中——格子是一塊磚，不是一份文件。
+        // 靠上的話，一兩個字的標題會孤零零掛在角落，跟百分比讀起來像兩件事。
+        // 代價是多行標題每一行的行首對不齊（中文沒有詞距，這件事比英文明顯），
+        // 這是知道之後仍然選的：短標題佔多數，置中的整齊感贏過長標題的參差。
         //
         // 另外三個看起來可以隨便寫、其實都不能的值：
         // 下緣收在 STRIP.content 而不是打卡條上緣，否則跟進度條那 4px 重疊。
@@ -363,11 +423,11 @@ function BoardCell({
         // 小格上下內距只有 2px：35px 的格子扣掉框線與 4px 內距，一行標題加一行
         //   數字的餘裕會薄到 3px，換個字型就被切。
         <div
-          className={`pointer-events-none absolute inset-x-0 top-0 flex flex-col items-start [justify-content:safe_center] gap-0.5 overflow-hidden text-left ${
+          className={`pointer-events-none absolute inset-x-0 top-0 flex flex-col items-center [justify-content:safe_center] gap-0.5 overflow-hidden text-center ${
             hasStrip ? STRIP.content : "bottom-0"
           } ${big ? "p-1.5 md:p-2.5" : "px-1 py-0.5 md:p-1"}`}
         >
-          <span className="flex min-w-0 items-start gap-1">
+          <span className="flex min-w-0 items-start justify-center gap-1">
             {suggestion ? <Sparkles size={big ? 14 : 10} className="mt-px shrink-0 text-accent-text" /> : null}
             {isMantra ? <Quote size={big ? 14 : 10} className="mt-px shrink-0 opacity-50" /> : null}
             <span
@@ -460,7 +520,7 @@ function Panel({
   planId: string;
   logs: Log[];
   today: string;
-  suggestion?: Suggestion;
+  suggestion?: Ghost;
   onEditSuggestion: (position: number, title: string) => void;
   onDismissSuggestion: (position: number) => void;
   onClose: () => void;
@@ -502,6 +562,20 @@ function Panel({
                 className={inputCls}
                 autoFocus
               />
+              {"trackingType" in suggestion ? (
+                // 追蹤方式在這裡是唯讀的。要改的話採用之後在同一個面板裡按型態就好，
+                // 為了「還沒存進去」的狀態再做一套型態選擇器不划算。
+                <p className="flex flex-wrap items-center gap-1.5 text-xs text-dim">
+                  {(() => {
+                    const Icon = TYPE[suggestion.trackingType].Icon;
+                    return <Icon size={13} />;
+                  })()}
+                  {TYPE[suggestion.trackingType].label}
+                  {suggestion.cadence ? `・${CADENCE[suggestion.cadence]}` : null}
+                  {suggestion.target ? `・目標 ${suggestion.target}` : null}
+                  <span className="text-dim/70">（採用後可以改）</span>
+                </p>
+              ) : null}
               <p className="flex items-start gap-2 text-sm text-dim leading-relaxed">
                 <Sparkles size={14} className="mt-0.5 shrink-0 text-accent-text" />
                 {suggestion.why}

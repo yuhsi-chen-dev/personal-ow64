@@ -193,3 +193,42 @@ export async function acceptSubGoals(
     return {};
   });
 }
+
+/**
+ * 一次採用多則 AI 建議的行為。與 acceptSubGoals 同一套規則：
+ * **空位在寫入的當下重新確認**，已經有人的位置直接跳過，
+ * 走的是跟手動存檔同一支 upsertAction 與同一份 actionInput。
+ */
+export async function acceptActions(
+  planId: string,
+  subGoalId: string,
+  items: { position: number; title: string; trackingType: string; cadence: string | null; target: number | null }[],
+): Promise<Result> {
+  return withUser(async (userId) => {
+    const data = await loadPlan(userId, planId);
+    if (!data) return { error: "找不到，或不屬於你" };
+    // subGoalId 來自表單，要確認它真的屬於這份計劃表——loadPlan 已經濾過主人了。
+    if (!data.subGoals.some((s) => s.id === subGoalId)) return { error: "找不到，或不屬於你" };
+
+    const taken = new Set(data.actions.filter((a) => a.subGoalId === subGoalId).map((a) => a.position));
+    const fresh = items.filter((i) => !taken.has(i.position));
+    if (fresh.length === 0) return { error: "這些位置都已經有內容了。" };
+
+    for (const item of fresh) {
+      // cadence 與 target 只對特定型態有意義，其餘一律丟掉——
+      // 跟 saveAction 同樣的處理，不要把使用者看不懂的 Zod 錯誤丟回去。
+      const parsed = actionInput.safeParse({
+        subGoalId,
+        position: item.position,
+        title: item.title,
+        trackingType: item.trackingType,
+        ...(item.trackingType === "habit" ? { cadence: item.cadence ?? "daily" } : {}),
+        ...(item.trackingType === "quota" && item.target !== null ? { target: item.target } : {}),
+      });
+      if (!parsed.success) return fail(parsed.error);
+      await upsertAction(userId, parsed.data);
+    }
+    revalidatePath(`/plans/${planId}`, "layout");
+    return {};
+  });
+}
