@@ -36,7 +36,7 @@ export async function saveSubGoal(_prev: Result, form: FormData): Promise<Result
   if (!parsed.success) return fail(parsed.error);
 
   await upsertSubGoal(parsed.data);
-  revalidatePath(`/plans/${parsed.data.planId}`);
+  revalidatePath(`/plans/${parsed.data.planId}`, "layout");
   return {};
 }
 
@@ -56,7 +56,8 @@ export async function saveAction(_prev: Result, form: FormData): Promise<Result>
   if (!parsed.success) return fail(parsed.error);
 
   await upsertAction(parsed.data);
-  revalidatePath(str(form, "planId") ? `/plans/${str(form, "planId")}` : "/");
+  // 一次打卡同時改變格子頁、今天頁與回顧頁，所以 revalidate 整個 layout 底下。
+  revalidatePath(str(form, "planId") ? `/plans/${str(form, "planId")}` : "/", "layout");
   return {};
 }
 
@@ -74,7 +75,8 @@ export async function logProgress(_prev: Result, form: FormData): Promise<Result
   if (!parsed.success) return fail(parsed.error);
 
   await logOnce({ ...parsed.data, cadence: action.cadence });
-  revalidatePath(str(form, "planId") ? `/plans/${str(form, "planId")}` : "/");
+  // 一次打卡同時改變格子頁、今天頁與回顧頁，所以 revalidate 整個 layout 底下。
+  revalidatePath(str(form, "planId") ? `/plans/${str(form, "planId")}` : "/", "layout");
   return {};
 }
 
@@ -83,7 +85,7 @@ export async function renamePlanTitle(_prev: Result, form: FormData): Promise<Re
   if (!parsed.success) return fail(parsed.error);
 
   await renamePlan(parsed.data.planId, parsed.data.title);
-  revalidatePath(`/plans/${parsed.data.planId}`);
+  revalidatePath(`/plans/${parsed.data.planId}`, "layout");
   revalidatePath("/");
   return {};
 }
@@ -107,7 +109,7 @@ export async function removeSubGoalCell(_prev: Result, form: FormData): Promise<
   if (!parsed.success) return fail(parsed.error);
 
   await removeSubGoal(parsed.data.id);
-  revalidatePath(`/plans/${parsed.data.planId}`);
+  revalidatePath(`/plans/${parsed.data.planId}`, "layout");
   return {};
 }
 
@@ -116,6 +118,6 @@ export async function removeActionCell(_prev: Result, form: FormData): Promise<R
   if (!parsed.success) return fail(parsed.error);
 
   await removeAction(parsed.data.id);
-  revalidatePath(`/plans/${parsed.data.planId}`);
+  revalidatePath(`/plans/${parsed.data.planId}`, "layout");
   return {};
 }
