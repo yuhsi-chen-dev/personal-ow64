@@ -40,7 +40,16 @@ const TYPE = {
  * 進度條的下緣。手機上聚焦的格子只有 60 幾 px 寬，條裡的字一旦斷行整條就會變兩倍高，
  * 往上蓋掉標題——所以條是固定高度、字不換行，寧可裁掉也不推擠版面。
  */
-const STRIP = { height: "h-7", inset: "bottom-7" };
+const STRIP = {
+  /** 打卡條本身，佔格子底部 0–28px。 */
+  height: "h-7",
+  /** 打卡條的上緣（28px）。點擊熱區收在這裡。 */
+  inset: "bottom-7",
+  /** 進度條的下緣（28px）——貼著打卡條，自己 h-1，所以佔 28–32px。 */
+  bar: "bottom-7",
+  /** 內容區的下緣（32px）＝進度條的上緣。三段首尾相接，不重疊也不留縫。 */
+  content: "bottom-8",
+};
 
 const CADENCE = { daily: "每日", weekly: "每週", monthly: "每月" } satisfies Record<Cadence, string>;
 /** 已完成的說法要用「這一期」而不是頻率本身：「每日已完成」讀起來不像話。 */
@@ -172,6 +181,10 @@ function BoardCell({
   // 底部有沒有那條打卡按鈕。有的話，格子的內容區必須在它上面收邊——
   // 不然標題的第二行會從沒有底色的「記一次」後面透出來。
   const hasStrip = big && cell.kind === "action" && Boolean(cell.id) && cell.trackingType !== "mantra";
+  // 核心與次目標格底下掛著百分比。小格子只有 35px 高，扣掉內距剩 27px，
+  // 一行字加一行數字剛好塞得下，兩行就爆——所以有數字的格子在手機上只給一行。
+  const hasPct = cell.kind !== "action" && cell.progress !== null;
+  const clamp = big ? "line-clamp-4" : hasPct ? "line-clamp-1 md:line-clamp-2" : "line-clamp-2";
 
   return (
     <div
@@ -191,15 +204,23 @@ function BoardCell({
       />
 
       {detail === "none" ? null : (
-      <div
-        className={`pointer-events-none absolute inset-x-0 top-0 flex flex-col justify-between overflow-hidden ${
-          hasStrip ? STRIP.inset : "bottom-0"
-        } ${big ? "p-1.5 md:p-2.5" : "p-1"}`}
-      >
-          <span className="flex items-start gap-1">
+        // 標題與百分比是同一個標籤，一起置中——格子是一塊磚，不是一份文件。
+        // 靠上靠左的話，一兩個字的標題會孤零零掛在角落，跟右下角的百分比讀起來像兩件事。
+        // 三個看起來可以隨便寫、其實都不能的值：
+        // 下緣收在 STRIP.content 而不是打卡條上緣，否則跟進度條那 4px 重疊。
+        // safe center 塞得下才置中，塞不下退回靠上——純 center 會上下對稱地裁，
+        //   留在畫面上的是標題中間那幾個字，開頭才是認出它是誰的部分。
+        // 小格上下內距只有 2px：35px 的格子扣掉框線與 4px 內距，一行標題加一行
+        //   數字的餘裕會薄到 3px，換個字型就被切。
+        <div
+          className={`pointer-events-none absolute inset-x-0 top-0 flex flex-col items-center [justify-content:safe_center] gap-0.5 overflow-hidden text-center ${
+            hasStrip ? STRIP.content : "bottom-0"
+          } ${big ? "p-1.5 md:p-2.5" : "px-1 py-0.5 md:p-1"}`}
+        >
+          <span className="flex min-w-0 items-start justify-center gap-1">
             {isMantra ? <Quote size={big ? 14 : 10} className="mt-px shrink-0 opacity-50" /> : null}
             <span
-              className={`min-w-0 leading-snug ${big ? "line-clamp-4" : "line-clamp-2"} ${
+              className={`min-w-0 leading-snug ${clamp} ${
                 big
                   ? cell.kind === "core" ? "text-[13px] md:text-base font-semibold" : "text-[11px] md:text-sm"
                   : cell.kind === "core" ? "text-[9px] md:text-[11px] font-semibold" : "text-[8px] md:text-[10px]"
@@ -209,22 +230,26 @@ function BoardCell({
             </span>
           </span>
 
-          {cell.kind !== "action" && cell.progress !== null ? (
-            <span className={`self-end font-medium tabular-nums opacity-70 ${big ? "text-xs md:text-sm" : "text-[8px] md:text-[10px]"}`}>
+          {hasPct ? (
+            <span className={`shrink-0 font-medium leading-none tabular-nums opacity-70 ${big ? "text-xs md:text-sm" : "text-[8px] md:text-[10px]"}`}>
               {pct(cell.progress)}
             </span>
           ) : null}
-
-          {hasStrip && cell.progress !== null ? (
-            <span className="h-1 rounded-full bg-black/10">
-              <span
-                className="block h-full rounded-full transition-[width] duration-500"
-                style={{ width: `${Math.round(cell.progress * 100)}%`, backgroundColor: slotColor(cell.slot) }}
-              />
-            </span>
-          ) : null}
-      </div>
+        </div>
       )}
+
+      {/* 進度條不進置中的那一疊：它是格子的邊框裝飾，要一直貼在打卡條上緣，
+          不能跟著標題的長短上下飄。 */}
+      {hasStrip && cell.progress !== null ? (
+        <span
+          className={`pointer-events-none absolute left-1.5 right-1.5 h-1 rounded-full bg-black/10 md:left-2.5 md:right-2.5 ${STRIP.bar}`}
+        >
+          <span
+            className="block h-full rounded-full transition-[width] duration-500"
+            style={{ width: `${Math.round(cell.progress * 100)}%`, backgroundColor: slotColor(cell.slot) }}
+          />
+        </span>
+      ) : null}
 
       {hasStrip ? <CheckStrip cell={cell} planId={planId} today={today} /> : null}
     </div>
