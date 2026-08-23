@@ -66,3 +66,8 @@ export function lastPeriods(today: string, cadence: Cadence, n: number): string[
   return Array.from({ length: n }, (_, i) => shiftPeriod(now, cadence, i - n + 1));
 }
 
+/** 'YYYY-MM' 那個月的最後一天。Date 的第 0 天就是上個月最後一天，不要自己查大小月。 */
+export function endOfMonth(key: string): string {
+  const [y, m] = key.split("-").map(Number) as [number, number];
+  return localDay(new Date(y, m, 0));
+}

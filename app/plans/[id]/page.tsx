@@ -1,19 +1,26 @@
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, LineChart } from "lucide-react";
 import { notFound } from "next/navigation";
 import { loadPlan } from "@/db/queries.ts";
 import { ThemeToggle } from "@/app/theme-toggle.tsx";
+import { RANGE_CHOICES, rangeDaysInput } from "@/lib/schemas.ts";
 import { PlanBoard } from "./plan-board.tsx";
 
 // 這頁每次請求都要讀當下的資料，不能在 build 時預渲染
 // （會連不到資料庫，而且預渲染出來的進度是舊的）。
 export const dynamic = "force-dynamic";
 
-// ponytail: 統計區間先固定 30 天。要讓使用者自選時再拉成參數。
-const RANGE_DAYS = 30;
+const RANGE_LABEL: Record<number, string> = { 30: "30 天", 90: "90 天", 365: "一年" };
 
-export default async function PlanPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function PlanPage({
+  params, searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ days?: string }>;
+}) {
   const { id } = await params;
+  // 網址是跨信任邊界的輸入，認不得的值退回 30，不要丟 500。見 lib/schemas.ts。
+  const rangeDays = rangeDaysInput.parse((await searchParams).days);
   const data = await loadPlan(id);
   if (!data) notFound();
 
@@ -29,8 +36,37 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
           <ChevronLeft size={16} />
         </Link>
         <h1 className="display min-w-0 flex-1 truncate text-base md:text-xl font-semibold">{data.plan.title}</h1>
+        <Link
+          href={`/plans/${id}/review`}
+          className="lift grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
+          aria-label="回顧"
+          title="回顧"
+        >
+          <LineChart size={16} />
+        </Link>
         <ThemeToggle />
       </header>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-dim">統計區間</span>
+        {RANGE_CHOICES.map((d) => (
+          <Link
+            key={d}
+            href={`?days=${d}`}
+            scroll={false}
+            aria-current={d === rangeDays ? "true" : undefined}
+            className={`lift rounded-full border px-3 py-1 text-xs ${
+              d === rangeDays
+                ? "border-transparent bg-accent font-medium text-black"
+                : "border-line bg-surface text-dim hover:text-text"
+            }`}
+          >
+            {RANGE_LABEL[d] ?? `${d} 天`}
+          </Link>
+        ))}
+        {/* 分母會跟著區間變，這件事得講出來，不然使用者會以為進度自己掉了。 */}
+        <span className="text-xs text-dim/70">習慣型的分母跟著這裡變</span>
+      </div>
 
       <PlanBoard
         planId={id}
@@ -38,7 +74,7 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
         subGoals={data.subGoals}
         actions={data.actions}
         logs={data.logs}
-        rangeDays={RANGE_DAYS}
+        rangeDays={rangeDays}
       />
     </main>
   );

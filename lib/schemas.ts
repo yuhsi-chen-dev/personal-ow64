@@ -7,6 +7,20 @@ const title = z.string().trim().min(1, "不能空白").max(200, "最多 200 字"
 const slot = z.number().int().min(0).max(7);
 
 export const planInput = z.object({ title });
+export const planRenameInput = z.object({ planId: z.string().min(1), title });
+export const planIdInput = z.object({ planId: z.string().min(1) });
+
+/** 刪除／封存一格。planId 只用來 revalidate，不參與判斷。 */
+export const removeInput = z.object({ id: z.string().min(1), planId: z.string().min(1) });
+
+/** 統計區間的選項。習慣型的分母直接由它決定，見 lib/day.ts 的 expectedPeriods。 */
+export const RANGE_CHOICES = [30, 90, 365] as const;
+
+/** URL 的 ?days=。認不得的值退回 30，不要對使用者亂改的網址丟 500。 */
+export const rangeDaysInput = z.coerce
+  .number()
+  .refine((n) => (RANGE_CHOICES as readonly number[]).includes(n))
+  .catch(RANGE_CHOICES[0]);
 
 export const subGoalInput = z.object({
   planId: z.string().min(1),
@@ -64,6 +78,7 @@ export const logInput = z
   });
 
 export type PlanInput = z.infer<typeof planInput>;
+export type RemoveInput = z.infer<typeof removeInput>;
 export type SubGoalInput = z.infer<typeof subGoalInput>;
 export type ActionInput = z.infer<typeof actionInput>;
 export type LogInput = z.infer<typeof logInput>;

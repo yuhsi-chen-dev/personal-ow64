@@ -2,8 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { findAction, insertPlan, logOnce, upsertAction, upsertSubGoal } from "@/db/writes.ts";
-import { actionInput, logInput, planInput, subGoalInput } from "@/lib/schemas.ts";
+import {
+  deletePlan, findAction, insertPlan, logOnce, removeAction, removeSubGoal, renamePlan,
+  upsertAction, upsertSubGoal,
+} from "@/db/writes.ts";
+import {
+  actionInput, logInput, planIdInput, planInput, planRenameInput, removeInput, subGoalInput,
+} from "@/lib/schemas.ts";
 
 export type Result = { error?: string };
 
@@ -70,5 +75,47 @@ export async function logProgress(_prev: Result, form: FormData): Promise<Result
 
   await logOnce({ ...parsed.data, cadence: action.cadence });
   revalidatePath(str(form, "planId") ? `/plans/${str(form, "planId")}` : "/");
+  return {};
+}
+
+export async function renamePlanTitle(_prev: Result, form: FormData): Promise<Result> {
+  const parsed = planRenameInput.safeParse({ planId: str(form, "planId"), title: str(form, "title") });
+  if (!parsed.success) return fail(parsed.error);
+
+  await renamePlan(parsed.data.planId, parsed.data.title);
+  revalidatePath(`/plans/${parsed.data.planId}`);
+  revalidatePath("/");
+  return {};
+}
+
+/** 刪掉整份計劃表，連同底下的次目標、行為、紀錄（FK cascade）。不可復原。 */
+export async function removePlan(_prev: Result, form: FormData): Promise<Result> {
+  const parsed = planIdInput.safeParse({ planId: str(form, "planId") });
+  if (!parsed.success) return fail(parsed.error);
+
+  await deletePlan(parsed.data.planId);
+  revalidatePath("/");
+  redirect("/");
+}
+
+/**
+ * 移除一個次目標或一項行為。打過卡的封存、沒打過的直接刪，
+ * 判斷在 db/writes.ts，見 docs/decisions/0009-soft-delete.md。
+ */
+export async function removeSubGoalCell(_prev: Result, form: FormData): Promise<Result> {
+  const parsed = removeInput.safeParse({ id: str(form, "id"), planId: str(form, "planId") });
+  if (!parsed.success) return fail(parsed.error);
+
+  await removeSubGoal(parsed.data.id);
+  revalidatePath(`/plans/${parsed.data.planId}`);
+  return {};
+}
+
+export async function removeActionCell(_prev: Result, form: FormData): Promise<Result> {
+  const parsed = removeInput.safeParse({ id: str(form, "id"), planId: str(form, "planId") });
+  if (!parsed.success) return fail(parsed.error);
+
+  await removeAction(parsed.data.id);
+  revalidatePath(`/plans/${parsed.data.planId}`);
   return {};
 }
