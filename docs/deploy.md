@@ -11,10 +11,38 @@
 開發過程會建假資料、清空資料表、跑會寫入的整合測試（`db/write-path.test.ts`），
 這些都不該碰到真正的打卡紀錄。
 
-做法：Neon 主控台開一條 `dev` branch（copy-on-write，幾秒鐘），
-把它的連線字串放進本機的 `.env.local`；`production` 那條留給 Vercel。
+**做法：現在這條當 production，另外分一條 `dev` 給本機。**
+
+方向不要反過來。現在這條已經套完全部 migration 且與 repo 同步，讓它當 production
+就不用再跑一次 migration，少一個出錯的機會；`dev` 是 copy-on-write 分出去的，
+幾秒鐘而且直接帶著現有資料的複本。
 
 從連線字串看不出它屬於哪條 branch，只能去主控台對。**每次換過連線字串都要重新確認一次。**
+確認的方法：本機跑一次查詢，看 `plans` 的內容跟你以為的那條對不對得上。
+
+## 三個環境不是三個 UAT
+
+Vercel 有 Production／Preview／Development，但它跟傳統的「開發→UAT→正式」不一樣：
+
+| | 什麼時候產生 | 網址 | 數量 |
+|---|---|---|---|
+| **Production** | push 到 `main` | 固定 | 一個 |
+| **Preview** | push 到任何其他分支、開 PR | **每次部署都是新的亂碼網址** | 同時可能有 N 個 |
+| **Development** | 本機 | — | — |
+
+UAT 是一個長期存在、大家共用的固定環境；**Preview 是每個 PR 一個、用完就丟的預覽站**。
+它回答的是「這個 PR 改的東西長怎樣」，不是「這一版能不能上線」。
+
+`CLAUDE.md` 寫「沒有 SLA、沒有多環境」，所以**不要為這個專案再開一個 UAT**。
+
+### Preview 的兩個已知限制（刻意不處理）
+
+1. **不設定的話，Preview 會沿用 Production 的環境變數**——等於每個 PR 的預覽站
+   直接讀寫正式資料。所以 `DATABASE_URL` 要在 Vercel 設兩次，Preview 指向 `dev`。
+2. **Preview 登不進去。** Google 的 redirect URI 不支援萬用字元，而 preview 網址
+   每次部署都不同，不可能一一註冊。預覽站只看得到登出的門面頁。
+   Auth.js 有 redirect proxy 可以繞過，但這個 app 幾乎每一頁都要登入，
+   為一個看不到內容的預覽站去研究它不划算。
 
 ## 環境變數
 
@@ -28,9 +56,11 @@
 
 `AUTH_URL` 不用設，Auth.js 在 Vercel 上會自己認出網域。
 
-設在 Vercel → Settings → Environment Variables，勾 Production / Preview / Development。
+設在 Vercel → Settings → Environment Variables。**`DATABASE_URL` 要設兩次**：
+Production 用現在這條、Preview 用 `dev` 那條；其餘四個三個環境都勾同一個值。
 
-Preview 要不要連同一個資料庫，自己決定：連同一條的話，每個 PR 的預覽站都會動到正式資料。
+**`AUTH_SECRET` production 要用全新的一組**（`openssl rand -base64 32`），不要沿用本機那組。
+它是簽 session 的金鑰，兩邊共用等於本機開發能簽出線上認得的 cookie。
 
 **pooled 還是 direct 都可以。** `db/index.ts` 走 `drizzle-orm/neon-http` + `neon()`，
 是無狀態的 HTTP 呼叫、不持有連線，所以 pooler 對它沒有差別。
@@ -109,16 +139,38 @@ DATABASE_URL='<production 的連線字串>' npm run db:migrate
 之後每次改完 `db/schema.ts`、跑過 `db:generate`，都要記得再對 production 跑一次——
 **忘了跑的症狀是線上報 column 不存在，本機卻一切正常。**
 
+## 操作順序
+
+彼此有依賴，不能跳。決策都已經定了（見上面各節），這裡只剩操作。
+
+```
+1. Neon → 從現在這條開一條 dev branch
+2. dev 的連線字串貼進本機 .env.local 的 DATABASE_URL
+   ↓ 停下來確認本機真的連到 dev（查一次 plans 的內容）
+3. openssl rand -base64 32  產生新的 AUTH_SECRET
+4. Vercel → Import yuhsi-chen-dev/personal-ow64
+5. 設環境變數（先設，再 deploy——見「一個會讓你以為部署成功的陷阱」）
+6. Deploy → 拿到 xxx.vercel.app
+7. GCP → Credentials → 加 https://xxx.vercel.app/api/auth/callback/google
+8. GCP → 目標對象 → 把要用的人加進「測試使用者」
+   （只有自己要用的話可以跳過，專案擁有者不受清單限制）
+9. 走一遍驗收（見下）
+```
+
+第 8 步以外，1–7 都只能在 Vercel／GCP／Neon 的網頁上做。
+
 ## 上線後走一遍
 
-- 四個路由都開得起來：`/`、`/plans/[id]`、`/plans/[id]/today`、`/plans/[id]/review`
 - 用 Google 登入、登出、再登入
 - 建立計劃表 → 填次目標 → 填行為 → 打卡 → 改核心目標名稱 → 移除一格 → 刪計劃表
 - **資料隔離**：換一個 Google 帳號登入，確認看不到前一個帳號的計劃表
+- 四個路由都開得起來：`/`、`/plans/[id]`、`/plans/[id]/today`、`/plans/[id]/review`
 - 瀏覽器 console 沒有錯誤
 - 手機上實際開一次今天頁（那才是它存在的理由）
-- **AI 建議按一次**，順便量生成花多久。Vercel 的 function 有執行時間上限，
-  本機沒有——這是唯一只會在線上出現的失敗（`decisions/0012`）。
+- **AI 建議按一次，順便量生成花多久。** Vercel 的 function 有執行時間上限，本機沒有——
+  這是唯一只會在線上出現的失敗（`decisions/0012`）。本機量到 2.5 秒，
+  最壞情況（503 重試一次）約 6 秒。**真的撞到上限才加 `export const maxDuration`**，
+  沒撞到就不要為一個不存在的問題先寫設定。
 
 **第一個請求會慢幾秒是正常的。** Neon 免費方案閒置會 suspend，那是睡著不是刪資料，
 下次請求自己醒（`decisions/0005`）。
