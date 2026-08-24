@@ -26,7 +26,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
         <Link
           href={`/plans/${id}`}
           aria-label="回到格子"
-          className="lift grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
+          className="lift tap grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
         >
           <ChevronLeft size={16} />
         </Link>

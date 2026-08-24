@@ -194,11 +194,20 @@ export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDay
 
   return (
     <div className="flex flex-col md:flex-row md:items-start gap-6">
-      <section className="flex-1 min-w-0">
+      {/*
+        手機上右欄整根固定在螢幕底部，所以盤面要自己讓出那塊空間，
+        否則最後一列格子永遠壓在抽屜底下點不到。
+        ponytail: 抽屜高度會隨內容變，這裡用一個夠大的定值，多出來的只是捲動餘裕。
+      */}
+      <section className="flex-1 min-w-0 pb-52 md:pb-0">
         <div
           // 外層必須是固定的正方形，否則 fr 在自動高度的容器裡不會照比例分配，
           // 聚焦的那一欄會把整張表撐得又高又歪。
-          className="mx-auto grid aspect-square w-full max-w-[760px] gap-2"
+          // 盤面是正方形，寬度吃滿高度就跟著吃滿，小螢幕上會頂到底下那個固定的抽屜。
+          // 手機：扣掉標題列與統計區間那排、再留給收合的抽屜，大約 230px。
+          // md 以上抽屜回到右欄，同一條規則照舊：盤面不超過標題列以下到螢幕底部的空間。
+          // 852×393 的橫向 iPhone 走的是 md 版面，但只有 393 高，不夾這一下會比螢幕還高。
+          className="mx-auto grid aspect-square w-full max-w-[min(100%,760px,calc(100dvh-230px))] gap-2 md:max-w-[min(100%,760px,calc(100dvh-140px))]"
           style={{
             gridTemplateColumns: [0, 1, 2].map((i) => track(i, focusCol)).join(" "),
             gridTemplateRows: [0, 1, 2].map((i) => track(i, focusRow)).join(" "),
@@ -236,12 +245,23 @@ export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDay
       </section>
 
       {/*
-        右欄整根 sticky，而不是只有面板 sticky——「回到全覽」跟著面板一起釘住，
+        右欄整根釘住，而不是只有面板釘住——「回到全覽」與 AI 按鈕跟著面板一起，
         滑到哪都按得到，不用捲回格子底下。
-        top 要讓開上面那條 sticky header（py-3 + h-9 + 框線 ≈ 61px），
-        給 16px 呼吸；只釘面板、又只離頂 16px 的話，面板會蓋到 header 上面。
+
+        手機是固定在螢幕底部的抽屜（整根，不只面板）。原本只有面板 fixed，
+        AI 按鈕與「回到全覽」留在一般流裡排在 390px 高的盤面底下——
+        它們在摺線以外，要捲下去才點得到，這正是手機上最惱人的地方。
+
+        桌機退回 sticky。top 要讓開上面那條 sticky header（py-3 + h-9 + 框線 ≈ 61px），
+        給 16px 呼吸；只離頂 16px 的話，面板會蓋到 header 上面。
+
+        高度用 dvh 不用 vh：iOS Safari 的 vh 是「工具列收起來時」的高度，
+        用 vh 的話抽屜會比看得見的區域還高，底部內容被工具列吃掉。
       */}
-      <div className="flex flex-col gap-3 md:sticky md:top-[76px] md:w-80 md:shrink-0">
+      <div
+        className="fixed inset-x-0 bottom-0 z-30 flex max-h-[70dvh] flex-col gap-3 overflow-y-auto border-t border-line bg-surface p-4 shadow-[var(--shadow)]
+                   md:sticky md:top-[76px] md:z-auto md:max-h-none md:w-80 md:shrink-0 md:overflow-visible md:border-0 md:bg-transparent md:p-0 md:shadow-none"
+      >
         <Panel
           cell={selected}
           planId={planId}
@@ -529,15 +549,14 @@ function Panel({
 }) {
   return (
     <aside
-      // 手機是釘在底部的抽屜（z-30 蓋過格子）；桌機退回一般流排在右欄裡，
-      // z 也要跟著退回去——不加 md:z-auto 的話 z-30 會贏過 header 的 z-20，
-      // 面板就疊到標題列上面了。sticky 交給外層那一欄，這裡不要再釘一次。
-      className="fixed inset-x-0 bottom-0 z-30 max-h-[72vh] overflow-y-auto border-t border-line bg-surface p-5
-                 md:static md:z-auto md:max-h-none md:w-full md:rounded-2xl md:border
-                 shadow-[var(--shadow)]"
+      // 固定在底部的抽屜現在是外層那一欄的事，這裡只管自己的外觀：
+      // 手機上它已經在抽屜裡了，不要再套一層框線與內距；桌機才是一張獨立的卡片。
+      className="md:w-full md:rounded-2xl md:border md:border-line md:bg-surface md:p-5 md:shadow-[var(--shadow)]"
     >
       {cell === null ? (
-        <p className="text-sm text-dim">點左邊任何一格開始編輯。</p>
+        // 手機的抽屜要盡量矮，把盤面留給使用者。這句是桌機右欄的空狀態提示，
+        // 手機上沒有「左邊」可言，留著只是白佔一整條。
+        <p className="hidden text-sm text-dim md:block">點左邊任何一格開始編輯。</p>
       ) : (
         <>
           <div className="mb-4 flex items-start justify-between gap-2">
@@ -548,7 +567,7 @@ function Panel({
               />
               {panelTitle(cell)}
             </span>
-            <button type="button" onClick={onClose} aria-label="關閉面板" className="text-dim hover:text-text cursor-pointer">
+            <button type="button" onClick={onClose} aria-label="關閉面板" className="tap shrink-0 text-dim hover:text-text cursor-pointer">
               <X size={16} />
             </button>
           </div>

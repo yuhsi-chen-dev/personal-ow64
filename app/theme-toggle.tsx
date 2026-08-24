@@ -32,7 +32,7 @@ export function ThemeToggle() {
       }}
       aria-label={next === "dark" ? "切換到深色模式" : "切換到淺色模式"}
       title={next === "dark" ? "深色模式" : "淺色模式"}
-      className="lift grid h-9 w-9 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text cursor-pointer"
+      className="lift tap grid h-9 w-9 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text cursor-pointer"
     >
       {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
     </button>

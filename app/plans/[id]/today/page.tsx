@@ -22,7 +22,7 @@ export default async function TodayPage({ params }: { params: Promise<{ id: stri
         <Link
           href="/"
           aria-label="回到計劃表列表"
-          className="lift grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
+          className="lift tap grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
         >
           <ChevronLeft size={16} />
         </Link>
@@ -33,7 +33,7 @@ export default async function TodayPage({ params }: { params: Promise<{ id: stri
           href={`/plans/${id}`}
           aria-label="回到格子"
           title="回到格子"
-          className="lift grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
+          className="lift tap grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
         >
           <Grid3x3 size={16} />
         </Link>
