@@ -36,14 +36,14 @@ export default async function PlanPage({
         <Link
           href="/"
           aria-label="回到計劃表列表"
-          className="lift grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
+          className="lift tap grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
         >
           <ChevronLeft size={16} />
         </Link>
         <h1 className="display min-w-0 flex-1 truncate text-base md:text-xl font-semibold">{data.plan.title}</h1>
         <Link
           href={`/plans/${id}/today`}
-          className="lift grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
+          className="lift tap grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
           aria-label="今天"
           title="今天"
         >
@@ -51,7 +51,7 @@ export default async function PlanPage({
         </Link>
         <Link
           href={`/plans/${id}/review`}
-          className="lift grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
+          className="lift tap grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
           aria-label="回顧"
           title="回顧"
         >
@@ -68,7 +68,9 @@ export default async function PlanPage({
             href={`?days=${d}`}
             scroll={false}
             aria-current={d === rangeDays ? "true" : undefined}
-            className={`lift rounded-full border px-3 py-1 text-xs ${
+            // 26px 的藥丸在手機上按不準：py-2 把看得見的部分加到 34px，
+            // .tap 再把熱區補到 44px。上下都有 24px 的間距，撐開的 5px 蓋不到別人。
+            className={`lift tap rounded-full border px-3 py-2 text-xs md:py-1 ${
               d === rangeDays
                 ? "border-transparent bg-accent font-medium text-black"
                 : "border-line bg-surface text-dim hover:text-text"

@@ -56,10 +56,18 @@ export function TodayMap({ planId, planTitle, subGoals, actions, logs }: Props) 
   const selected = selectedKey === null ? null : board.cells.find((c) => keyOf(c) === selectedKey) ?? null;
 
   return (
-    <div className="flex flex-col gap-5">
+    // 手機上底下那張卡是固定在螢幕底部的，盤面得自己讓出那塊空間，
+    // 否則最後一列格子點不到。ponytail: 定值，多的只是捲動餘裕。
+    <div className="flex flex-col gap-5 pb-56 md:pb-0">
       <Tally done={counts.done} total={counts.total} />
 
-      <div className="mx-auto grid aspect-square w-full max-w-[560px] grid-cols-3 grid-rows-3 gap-2">
+      {/*
+        盤面是正方形，寬度吃滿高度就跟著吃滿，小螢幕上會頂到底下那張固定的卡片。
+        手機：扣掉標題列、計數列與卡片大約 260px，剩下的才是盤面能用的邊長——
+        這一頁的重點是「今天一眼看完」，被蓋掉兩列就得捲，那就白做了。
+        md 以上卡片回到一般流，不用讓位，扣掉的只有標題列與計數列。
+      */}
+      <div className="mx-auto grid aspect-square w-full max-w-[min(100%,560px,calc(100dvh-260px))] grid-cols-3 grid-rows-3 gap-2 md:max-w-[min(100%,560px,calc(100dvh-130px))]">
         {blocks.map((block, bi) => (
           <div key={bi} className="grid min-h-0 min-w-0 grid-cols-3 grid-rows-3 gap-1">
             {block.map((cell, ci) => (
@@ -177,7 +185,12 @@ function Tally({ done, total }: { done: number; total: number }) {
 function Detail({
   cell, planId, logs, today, total,
 }: { cell: Cell | null; planId: string; logs: Log[]; today: string; total: number }) {
-  const box = "rounded-2xl border border-line bg-surface p-4";
+  // 這一頁是為手機存在的，而打卡那顆按鈕原本排在 390px 高的盤面底下——
+  // 每天早上都要先捲一次才按得到。改成固定在螢幕底部的拇指區，盤面留在上面看得見。
+  // 高度用 dvh 不用 vh：iOS Safari 的 vh 不含工具列，會讓卡片比看得見的區域還高。
+  const box =
+    "fixed inset-x-0 bottom-0 z-30 max-h-[70dvh] overflow-y-auto border-t border-line bg-surface p-5 shadow-[var(--shadow)] " +
+    "md:static md:z-auto md:max-h-none md:overflow-visible md:rounded-2xl md:border md:p-4 md:shadow-none";
 
   if (cell === null || cell.kind !== "action" || !cell.id) {
     return (

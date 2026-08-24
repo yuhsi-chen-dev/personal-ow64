@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { useToday } from "@/app/use-today.ts";
 import type { BoardAction, BoardSubGoal } from "@/lib/board.ts";
 import { SLOTS } from "@/lib/mandala.ts";
@@ -87,9 +88,30 @@ function YearHeatmap({ logs, today }: { logs: Log[]; today: string }) {
   const width = weeks.length * PITCH - 2;
   const height = TOP + 7 * PITCH - 2;
 
+  // 手機上這張圖是橫向捲動的，預設要停在最右邊（最近）。桌機沒有溢出，這行不做事。
+  const scroller = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scroller.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [width]);
+
   return (
     <div className="rounded-2xl border border-line bg-surface p-4">
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-auto w-full" role="img" aria-label="這一年每天的打卡熱圖">
+      {/*
+        53 週 × 7 天。桌機容器有 700 多 px，一格畫得出 10px；手機只有 340 px，
+        整張縮下去每格剩 5px——那不是變小，是消失，一年的疏密看不出來。
+        所以手機改成橫向捲動、格子維持原尺寸，而且**捲到最右邊**：
+        回顧最先想看的是最近，不是去年的這個時候。
+        桌機的 w-full 讓它照舊撐滿（minWidth 比容器窄，不影響）。
+      */}
+      <div ref={scroller} className="-mx-1 overflow-x-auto px-1">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          style={{ minWidth: width }}
+          className="h-auto w-full"
+          role="img"
+          aria-label="這一年每天的打卡熱圖"
+        >
         {weeks.map((week, w) => (
           <g key={w}>
             {labels[w] ? (
@@ -113,7 +135,8 @@ function YearHeatmap({ logs, today }: { logs: Log[]; today: string }) {
             ))}
           </g>
         ))}
-      </svg>
+        </svg>
+      </div>
       <div className="mt-3 flex items-center justify-end gap-1.5 text-xs text-dim">
         <span>少</span>
         {[0, 1, 2, 3, 4].map((n) => (

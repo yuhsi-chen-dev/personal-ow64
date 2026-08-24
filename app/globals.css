@@ -73,6 +73,26 @@ body {
   letter-spacing: -0.022em;
 }
 
+/*
+ * iPhone 的觸控目標下限是 44×44pt（Apple HIG）。圖示按鈕做成 44px 的圓會把
+ * 標題列擠爆，所以視覺尺寸不動，只用一個看不見的偽元素把可點區域撐開。
+ * 偽元素屬於按鈕本身，點它就等於點按鈕，不需要額外的事件處理。
+ *
+ * ponytail: 只給圖示按鈕用。有文字的按鈕靠 padding 就有足夠高度了。
+ */
+.tap {
+  position: relative;
+}
+.tap::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .lift {
     transition: transform 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;

@@ -120,7 +120,7 @@ export default async function Home() {
                 <ActionForm action={removePlan} className="ml-auto shrink-0 pb-2 sm:pb-0">
                   <input type="hidden" name="planId" value={p.id} />
                   <ConfirmButton
-                    className="grid h-9 w-9 place-items-center rounded-full text-dim hover:bg-surface-2 hover:text-red-600 cursor-pointer"
+                    className="tap grid h-9 w-9 place-items-center rounded-full text-dim hover:bg-surface-2 hover:text-red-600 cursor-pointer"
                     confirmClassName="whitespace-nowrap rounded-full bg-red-600 px-3 py-1.5 text-xs font-medium text-white cursor-pointer"
                     idle={<Trash2 size={15} />}
                     confirm="確定刪除"
