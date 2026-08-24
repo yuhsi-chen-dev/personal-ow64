@@ -56,8 +56,14 @@ UAT 是一個長期存在、大家共用的固定環境；**Preview 是每個 PR
 
 `AUTH_URL` 不用設，Auth.js 在 Vercel 上會自己認出網域。
 
-設在 Vercel → Settings → Environment Variables。**`DATABASE_URL` 要設兩次**：
-Production 用現在這條、Preview 用 `dev` 那條；其餘四個三個環境都勾同一個值。
+設在 Vercel → Settings → Environment Variables。Environments 是個**單選下拉**
+（`Production and Preview` / `Production` / `Preview` / `Development`），不是三個勾選框。
+
+**`DATABASE_URL` 要設兩次**：一筆選 `Production` 用 production 那條、
+一筆選 `Preview` 用 `dev` 那條。其餘四個都選 `Production and Preview`。
+
+**`Development` 不用設。** 那格只影響 `vercel dev` 與 `vercel env pull`；
+本機是跑 `npm run dev` 直接讀 `.env.local`，設了也是死的。
 
 **`AUTH_SECRET` production 要用全新的一組**（`openssl rand -base64 32`），不要沿用本機那組。
 它是簽 session 的金鑰，兩邊共用等於本機開發能簽出線上認得的 cookie。
@@ -85,10 +91,14 @@ Production 用現在這條、Preview 用 `dev` 那條；其餘四個三個環境
 **「我自己登得進去」不能證明別人登得進去。** 專案擁有者不受測試使用者清單限制，
 所以自測永遠會過。要驗開放性，得找一個不在清單上、也不是專案成員的帳號試。
 
-切到 Production 有一個順序上的死結：品牌頁那三個網址要填公開 URL，
-而 URL 的網域必須先註冊在「授權網域」並驗證擁有權——**所以得先部署拿到網域，
-才填得了那三欄，才按得動「發布應用程式」**。在那之前按鈕是灰的，
-畫面上只會說「OAuth 設定未完成」，不會告訴你缺哪一欄。
+**這個 app 停在「測試中」，不走 Production。** 要給誰用就把 email 加進測試使用者清單。
+理由與推翻的條件見 [`decisions/0013`](decisions/0013-stay-in-testing.md)。
+
+Production 那一欄留在上表只是備查。它有個順序上的死結：品牌頁那三個網址要填公開 URL，
+而網域必須先註冊在「授權網域」並驗證擁有權——得先部署拿到網域才填得了那三欄，
+才按得動「發布應用程式」。在那之前按鈕是灰的，畫面上只會說「OAuth 設定未完成」，
+不會告訴你缺哪一欄。而 `personal-ow64.vercel.app` 解不開這個結：`vercel.app` 不是我們的網域，
+在 Google Search Console 證明不了擁有權。真要走這條路，第一步是買一個自己的網域。
 
 給認識的人用的話，測試中的 100 位額度就夠，不必走發布。
 
