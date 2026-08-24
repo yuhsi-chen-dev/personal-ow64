@@ -177,9 +177,11 @@ export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDay
     if (block !== focus) {
       setFocus(block);
       setSelectedKey(null);
-      // 換一塊看就換一種脈絡，上一批建議留著只會擋住新的格子。
-      setDraft(null);
       setAiError(null);
+      // 次目標的建議屬於整張盤面，放大哪一塊都還算數（從全覽點進去時 focus 是 null，
+      // 一律丟掉的話那批建議會在使用者點第一格的當下憑空消失）。
+      // 行為的建議綁在某一塊，換到別塊才真的失去脈絡。
+      if (draft?.kind === "action" && draft.slot !== slotOfBlock(block)) setDraft(null);
     } else {
       setSelectedKey(cellKey(cell));
     }
