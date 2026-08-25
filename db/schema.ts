@@ -4,8 +4,9 @@ import { pgTable, text, integer, real, timestamp, date, index, uniqueIndex } fro
 // 一份計劃表。title 即核心目標。
 export const plans = pgTable("plans", {
   id: text("id").primaryKey(),
-  // 擁有者。session 走 JWT、沒有 users 表，所以這裡存的是 OAuth provider 的 subject id
-  // （Google 的 sub）。次目標、行為、紀錄都沒有自己的 userId，一律往上 join 到這裡——
+  // 擁有者。session 走 JWT、沒有 users 表，所以這裡存的是 Google 的 sub
+  // （21 位左右的數字字串，由 auth.ts 的 jwt callback 釘住，見那裡的註解）。
+  // 次目標、行為、紀錄都沒有自己的 userId，一律往上 join 到這裡——
   // 多存一份就多一個會不同步的地方。見 docs/decisions/0011-multi-tenant.md。
   userId: text("user_id").notNull(),
   title: text("title").notNull(),

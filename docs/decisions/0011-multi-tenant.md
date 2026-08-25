@@ -48,6 +48,21 @@
 3. 每一支都要有整合測試，測的是「B 拿 A 的 id 打進來會被擋下」，
    不是「A 自己操作正常」。後者過了不代表前者。
 
+## userId 存的是什麼，以及為什麼不能用預設值
+
+Auth.js 在 JWT 策略下，`token.sub` 預設是**每次登入現生的 UUID**，不是 provider 的
+subject。這是 `@auth/core` 的刻意設計（`getUserAndAccount` 讓 user 不綁 provider，
+Google 的 sub 交給 adapter 存進 `accounts` 表）——但我們為了不建使用者資料表而沒有
+adapter，那份對應關係就無處可存。照預設走的後果是：同一個人重新登入就變成新的人，
+`plans.userId` 對不上，自己的計劃表從此看不到，而且沒有任何錯誤訊息。
+
+所以 `auth.ts` 用 `jwt` callback 把 `token.sub` 換成 `account.providerAccountId`，
+也就是 Google 的 sub。它對一個 Google 帳號永久唯一、不重用，跨 OAuth client 也一樣。
+
+這件事上線後才發現，前四筆資料的 `userId` 是那種一次性 UUID，只能請當事人重新登入
+拿到 sub 之後人工更新。**「擁有權落在寫入層」擋得住別人寫你的資料，擋不住身分本身
+每次都換一個**——身分的穩定性跟隔離是兩件事，兩件都要成立這篇才算數。
+
 ## 後果
 
 - `plans` 加 `userId`，需要新的 migration。既有資料要指定主人或清掉。

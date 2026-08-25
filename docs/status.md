@@ -34,8 +34,10 @@
   其餘沉成底色；點格子看它是什麼，下面一顆大按鈕打卡，上面是「今天 3/7」的計數。
   淺色／深色可切換並記住選擇。視覺語言見 `decisions/0007`。四頁都是 `force-dynamic`。
 - 登入與資料隔離：Auth.js v5 + Google，session 走 JWT（沒有 users／accounts／sessions
-  資料表）。`plans.userId` 存 OAuth subject，其餘三張表往上 join。
+  資料表）。`plans.userId` 存 Google 的 sub，其餘三張表往上 join。
   `db/writes.ts` 每一支都吃 `userId`，改動時型別會逼你補上。見 `decisions/0011`。
+  **`auth.ts` 的 `jwt` callback 是必要的**：Auth.js 預設的 `token.sub` 是每次登入
+  現生的 UUID，不釘住的話同一個人重新登入就變成新的人。
 - AI 建議：輸入核心目標可以請 AI 拆成 8 個次目標；聚焦某一塊之後可以再請它想
   底下的 8 項行為，含追蹤方式。建議以虛線的「幽靈格」落在盤面上，沒進資料庫，
   可以逐格改字或丟掉，按「全部採用」才寫入。模型走 Gemini 免費額度，見 `decisions/0012`。
@@ -118,6 +120,11 @@ Google 帳號實際登入 production 成功，同意畫面顯示 app 名稱與 l
 
 ## 尚未開始
 
+- **前三筆 production 資料的 `user_id` 還是壞的**（上面那個 UUID bug 留下的）。
+  修法上線之後，要請三個帳號各自重新登入一次、隨手建一份空計劃表，
+  抄下那筆的 `user_id`（Google sub 是數字字串，跟舊的 UUID 一眼可分），
+  再 `update plans set user_id = '<sub>' where id = '<plan id>'`，最後刪掉臨時那筆。
+  用 plan id 當條件，不要用 user_id。第三個帳號（yahoo 那個）聯絡不到就救不回來。
 - 封存資料的復原入口（資料還在，目前只能手動下 SQL，見 `decisions/0009`）。
 
 **已經發布了，所以下面這幾條不再是「開放註冊之前要補」，是欠著的**

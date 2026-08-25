@@ -7,8 +7,17 @@ import Google from "next-auth/providers/google";
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [Google],
   callbacks: {
+    // token.sub 預設**不是**穩定身分：OAuth 流程給的 user.id 是每次登入現生的
+    // crypto.randomUUID()（@auth/core 的 getUserAndAccount，它刻意讓 user 不綁 provider，
+    // 因為正常情況下 Google 的 sub 會被 adapter 存進 accounts 表）。我們沒有 adapter，
+    // 那份對應關係無處可存，於是同一個人每次登入都會變成新的人、看不到自己的計劃表。
+    // 所以在登入當下（只有這一次 account 有值）把 token.sub 換成 Google 的 sub。
+    // Google 的 sub 對一個 Google 帳號永久唯一且不重用，跨 OAuth client 也一樣。
+    jwt({ token, account }) {
+      if (account?.providerAccountId) token.sub = account.providerAccountId;
+      return token;
+    },
     // JWT 策略下 session.user.id 預設是空的，要自己從 token.sub 補上。
-    // token.sub 是 Google 的 subject——同一個 Google 帳號對這個 app 永遠是同一個值。
     session({ session, token }) {
       if (token.sub) session.user.id = token.sub;
       return session;
