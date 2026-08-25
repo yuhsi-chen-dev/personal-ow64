@@ -34,35 +34,48 @@ export default async function Dashboard() {
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-12 px-5 py-10 sm:px-6 md:py-16">
-      <header className="flex items-start justify-between gap-4">
-        <div className="flex flex-col gap-3">
-          <span className="inline-flex items-center gap-1.5 self-start rounded-full border border-line bg-surface px-3 py-1 text-xs text-dim">
-            <Sparkles size={13} className="text-accent-text" />
+      {/*
+        兩段式：上面一列放 tag 與右邊的按鈕，標題自己獨佔一整列。
+        原本是「左邊一整欄 vs 右邊按鈕」，手機上按鈕把標題擠到只剩半個螢幕，
+        「Open Window 64」就被折成兩行。標題不跟按鈕搶寬度就沒這回事。
+
+        說明文字拿掉了。這頁是每天要開的工作頁，不是介紹頁——那句話你第一天就讀完了，
+        之後每次打開都只是要略過的一行。想看介紹，頁尾有「關於 Open Window 64」。
+      */}
+      <header className="flex flex-col gap-3">
+        {/*
+          三個東西同一個高度（h-9）：左邊的 tag、登出、主題切換。
+          原本 tag 26px、登出 44px、主題 36px，三種高度排在一列會看起來沒對齊。
+          登出縮成 36px 之後觸控高度不夠，改用 .tap 的偽元素把可點區域撐回 44pt。
+
+          flex-wrap + ml-auto：窄螢幕上「曼陀羅計劃表 · Mandal-Art」加兩顆按鈕擠不進一列，
+          就讓按鈕整組掉到第二列並靠右，而不是把 tag 壓扁或讓它溢出。
+        */}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-3.5 text-xs text-dim">
+            <Sparkles size={13} className="shrink-0 text-accent-text" />
             曼陀羅計劃表 · Mandal-Art
           </span>
-          <h1 className="display text-[2.125rem] leading-[1.1] font-semibold sm:text-4xl md:text-5xl md:leading-[1.05]">
-            Open Window
-            <span className="ml-2 bg-gradient-to-br from-accent to-[oklch(0.68_0.17_232)] bg-clip-text text-transparent">
-              64
-            </span>
-          </h1>
-          <p className="max-w-md leading-[1.9] text-dim text-pretty">
-            一個核心目標，拆成 8 個次目標，再拆成 64 個具體行為，然後每天把它們一格一格填滿。
-          </p>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <form action={signOutOfApp}>
+              <button
+                type="submit"
+                title={session?.user?.email ?? undefined}
+                className="lift tap inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-3.5 text-xs text-dim hover:text-text cursor-pointer"
+              >
+                <LogOut size={13} />
+                登出
+              </button>
+            </form>
+            <ThemeToggle />
+          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <form action={signOutOfApp}>
-            <button
-              type="submit"
-              title={session?.user?.email ?? undefined}
-              className="lift inline-flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-dim hover:text-text cursor-pointer"
-            >
-              <LogOut size={13} />
-              登出
-            </button>
-          </form>
-          <ThemeToggle />
-        </div>
+        <h1 className="display text-[2.125rem] leading-[1.1] font-semibold sm:text-4xl md:text-5xl md:leading-[1.05]">
+          Open Window
+          <span className="ml-2 bg-gradient-to-br from-accent to-[oklch(0.68_0.17_232)] bg-clip-text text-transparent">
+            64
+          </span>
+        </h1>
       </header>
 
       <section className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow)] sm:p-6">
