@@ -260,7 +260,8 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
             {signedIn ? (
               <Link
                 href="/dashboard"
-                className="lift inline-flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-surface px-3.5 text-xs text-dim hover:text-text"
+                // 跟旁邊的主題切換同高（36px）；觸控高度靠 .tap 撐回 44pt，跟 /dashboard 的登出同一招
+                className="lift tap inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-3.5 text-xs text-dim hover:text-text"
               >
                 <LayoutGrid size={13} />
                 我的計劃表
