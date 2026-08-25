@@ -86,29 +86,44 @@ UAT 是一個長期存在、大家共用的固定環境；**Preview 是每個 PR
 | 發布狀態 | 誰登得進來 | 需要什麼 |
 |---|---|---|
 | **測試中**（預設） | 專案擁有者，加上手動列在「測試使用者」的帳號，**上限 100 位** | 什麼都不用 |
-| **Production** | 任何有 Google 帳號的人 | 品牌頁的首頁／隱私權政策／服務條款網址，以及已驗證擁有權的授權網域 |
+| **Production**（現在是這個） | 任何有 Google 帳號的人 | 品牌頁的首頁／隱私權政策／服務條款網址，以及已驗證擁有權的授權網域 |
 
 **「我自己登得進去」不能證明別人登得進去。** 專案擁有者不受測試使用者清單限制，
 所以自測永遠會過。要驗開放性，得找一個不在清單上、也不是專案成員的帳號試。
 
-**這個 app 停在「測試中」，不走 Production。** 要給誰用就把 email 加進測試使用者清單。
-理由與推翻的條件見 [`decisions/0013`](decisions/0013-stay-in-testing.md)。
-
-Production 那一欄留在上表只是備查。它有個順序上的死結：品牌頁那三個網址要填公開 URL，
-而網域必須先註冊在「授權網域」並驗證擁有權——得先部署拿到網域才填得了那三欄，
-才按得動「發布應用程式」。在那之前按鈕是灰的，畫面上只會說「OAuth 設定未完成」，
-不會告訴你缺哪一欄。而 `personal-ow64.vercel.app` 解不開這個結：`vercel.app` 不是我們的網域，
-在 Google Search Console 證明不了擁有權。真要走這條路，第一步是買一個自己的網域。
-
-給認識的人用的話，測試中的 100 位額度就夠，不必走發布。
+**這個 app 已經是 Production（「實際運作中」、使用者類型「外部」）。**
+任何 Google 帳號都登得進來，測試使用者清單已經失效，要給誰用把網址給他就好。
+理由見 [`decisions/0014`](decisions/0014-publish-oauth-app.md)。
 
 **不要按「設為內部」。** 那是給 Google Workspace 組織用的，會把登入限制在該組織成員。
 
-### 同意畫面的 logo 不會顯示
+### 走到發布卡在哪、怎麼解開的
 
-上傳了也不會出現——它要通過 Brand verification 才會渲染，而驗證要有隱私權政策、
-服務條款與已驗證的網域。測試中的 app 只會看到「登入『<專案名稱>』」配 Google 自己的圖示。
-原檔留在 `docs/assets/`，等真的要開放註冊、本來就得寫隱私權政策時再一起處理。
+留著這一段，因為兩個關卡都不會在畫面上告訴你缺什麼。
+
+**關卡一：授權網域必須是你證明得了擁有權的網域。** 品牌頁那三個網址要填公開 URL，
+而網域得先註冊在「授權網域」並在 Google Search Console 驗證。填不齊的時候
+「發布應用程式」是灰的，畫面只說「OAuth 設定未完成」，不會指出缺哪一欄。
+`personal-ow64.vercel.app` 解不開——`vercel.app` 不是我們的，證明不了擁有權。
+
+解法是 `personal-ow64.duckdns.org`。`duckdns.org` 在 Public Suffix List 上，
+所以這個子網域對 Google 來說算一個獨立的頂層私有網域，能在 Search Console 驗證。
+**不必買網域。**
+
+**關卡二：首頁必須不登入就看得懂。** 第一次送審被退，理由是「您的首頁必須登入才能瀏覽」。
+當時 `/` 其實不擋人（未登入 200、沒有轉址），但整頁可見的文字只有「先登入」加一顆按鈕——
+**審查看的是內容不是狀態碼**，技術上不是登入牆，讀起來就是一面登入牆。
+修的是內容不是路由：`/` 改成真正的介紹頁，並補上 `/privacy` 與 `/terms`。
+
+改完之後品牌頁的隱私權政策與服務條款要指到那兩個新網址（不能都指首頁），
+授權網域裡不可能驗證的 `vercel.app` 要拿掉，OAuth 用戶端的重新導向 URI 也要補上
+`https://personal-ow64.duckdns.org/api/auth/callback/google`——**Auth.js 沒設 `AUTH_URL`，
+callback 是從 Host 推導的**，少了這條從 duckdns 登入會直接被 Google 擋成 redirect_uri_mismatch。
+
+### 同意畫面的 logo
+
+Brand verification 通過之後才會渲染。現在已經通過，同意畫面會顯示 app 名稱與 logo，
+不再是「登入『<專案名稱>』」配 Google 自己的圖示。原檔在 `docs/assets/`。
 
 Auth.js 的 session 是我們自己用 `AUTH_SECRET` 簽的 JWT，登入後不再呼叫 Google 的 API，
 所以測試模式對 Google refresh token 的效期限制不影響使用者的登入狀態。
@@ -162,8 +177,7 @@ DATABASE_URL='<production 的連線字串>' npm run db:migrate
 5. 設環境變數（先設，再 deploy——見「一個會讓你以為部署成功的陷阱」）
 6. Deploy → 拿到 xxx.vercel.app
 7. GCP → Credentials → 加 https://xxx.vercel.app/api/auth/callback/google
-8. GCP → 目標對象 → 把要用的人加進「測試使用者」
-   （只有自己要用的話可以跳過，專案擁有者不受清單限制）
+8. GCP → 目標對象 → 確認發布狀態（現在是「實際運作中」，不必再管測試使用者清單）
 9. 走一遍驗收（見下）
 ```
 
