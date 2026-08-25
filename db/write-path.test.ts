@@ -8,7 +8,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "./index.ts";
 import { actions, logs, plans, subGoals } from "./schema.ts";
 import {
-  NotYours, deletePlan, findAction, insertPlan, logOnce, removeAction, removeSubGoal, renamePlan,
+  NotYours, deletePlan, findAction, insertPlan, logOnce, removeAction, removeSubGoal, renamePlan, undoLog,
   upsertAction, upsertSubGoal,
 } from "./writes.ts";
 import { listPlans, loadPlan, loadPlanLogs } from "./queries.ts";
@@ -45,8 +45,8 @@ describe("寫入路徑（真實資料庫）", { skip }, () => {
   });
 
   test("行為改追蹤方式也是更新，target 跟著換掉", async () => {
-    await upsertAction(A, { subGoalId, position: 0, title: "跑步", trackingType: "habit", cadence: "daily", target: null });
-    await upsertAction(A, { subGoalId, position: 0, title: "跑步", trackingType: "quota", cadence: null, target: 10 });
+    await upsertAction(A, { subGoalId, position: 0, title: "跑步", trackingType: "habit", cadence: "daily", timesPerPeriod: 1, target: null });
+    await upsertAction(A, { subGoalId, position: 0, title: "跑步", trackingType: "quota", cadence: null, timesPerPeriod: null, target: 10 });
 
     const rows = await getDb()
       .select()
@@ -59,14 +59,14 @@ describe("寫入路徑（真實資料庫）", { skip }, () => {
   });
 
   test("習慣型同一期打兩次只留一筆", async () => {
-    await upsertAction(A, { subGoalId, position: 1, title: "冥想", trackingType: "habit", cadence: "daily", target: null });
+    await upsertAction(A, { subGoalId, position: 1, title: "冥想", trackingType: "habit", cadence: "daily", timesPerPeriod: 1, target: null });
     const [action] = await getDb()
       .select()
       .from(actions)
       .where(and(eq(actions.subGoalId, subGoalId), eq(actions.position, 1)));
 
-    const first = await logOnce(A, { actionId: action!.id, trackingType: "habit", cadence: "daily", day: DAY, value: 1 });
-    const second = await logOnce(A, { actionId: action!.id, trackingType: "habit", cadence: "daily", day: DAY, value: 1 });
+    const first = await logOnce(A, { actionId: action!.id, trackingType: "habit", cadence: "daily", timesPerPeriod: 1, day: DAY, value: 1 });
+    const second = await logOnce(A, { actionId: action!.id, trackingType: "habit", cadence: "daily", timesPerPeriod: 1, day: DAY, value: 1 });
 
     assert.equal(first, true, "第一次要寫進去");
     assert.equal(second, false, "第二次要被擋掉");
@@ -77,15 +77,67 @@ describe("寫入路徑（真實資料庫）", { skip }, () => {
     assert.equal(rows.length, 1);
   });
 
+  test("一週三次：第二、三次要記得進去，第四次才擋", async () => {
+    await upsertAction(A, {
+      subGoalId, position: 4, title: "慢跑", trackingType: "habit",
+      cadence: "weekly", timesPerPeriod: 3, target: null,
+    });
+    const [action] = await getDb()
+      .select()
+      .from(actions)
+      .where(and(eq(actions.subGoalId, subGoalId), eq(actions.position, 4)));
+
+    const one = { actionId: action!.id, trackingType: "habit" as const, cadence: "weekly" as const, timesPerPeriod: 3, value: 1 };
+    // 同一週的不同天，最後一次故意跟第三次同一天——上限是「一期三次」不是「一天一次」。
+    assert.equal(await logOnce(A, { ...one, day: "2026-08-17" }), true);
+    assert.equal(await logOnce(A, { ...one, day: "2026-08-18" }), true, "第二次不能被冪等擋掉");
+    assert.equal(await logOnce(A, { ...one, day: "2026-08-19" }), true, "第三次不能被冪等擋掉");
+    assert.equal(await logOnce(A, { ...one, day: "2026-08-19" }), false, "做滿三次之後才擋");
+    // 下一週重新開始
+    assert.equal(await logOnce(A, { ...one, day: "2026-08-24" }), true);
+
+    const rows = await getDb().select().from(logs).where(eq(logs.actionId, action!.id));
+    assert.equal(rows.length, 4);
+  });
+
+  test("撤銷只收回今天的最後一筆，前面的與別天的都要留著", async () => {
+    await upsertAction(A, {
+      subGoalId, position: 7, title: "喝水", trackingType: "quota",
+      cadence: null, timesPerPeriod: null, target: 100,
+    });
+    const [action] = await getDb()
+      .select()
+      .from(actions)
+      .where(and(eq(actions.subGoalId, subGoalId), eq(actions.position, 7)));
+
+    const one = { actionId: action!.id, trackingType: "quota" as const, cadence: null, timesPerPeriod: null };
+    await logOnce(A, { ...one, day: "2026-08-18", value: 1 });
+    await logOnce(A, { ...one, day: DAY, value: 2 });
+    await logOnce(A, { ...one, day: DAY, value: 3 });
+
+    assert.equal(await undoLog(A, action!.id, DAY), true);
+    const left = await getDb().select().from(logs).where(eq(logs.actionId, action!.id));
+    assert.deepEqual(
+      left.map((l) => `${l.day}:${l.value}`).sort(),
+      [`${DAY}:2`, "2026-08-18:1"].sort(),
+      "只該少掉今天的最後一筆",
+    );
+
+    assert.equal(await undoLog(A, action!.id, DAY), true);
+    assert.equal(await undoLog(A, action!.id, DAY), false, "今天沒得撤銷時要回 false，不是丟錯");
+    const rest = await getDb().select().from(logs).where(eq(logs.actionId, action!.id));
+    assert.equal(rest.length, 1, "別天的紀錄不能被掃到");
+  });
+
   test("累計型同一天可以記多次，不該被冪等擋掉", async () => {
-    await upsertAction(A, { subGoalId, position: 2, title: "讀書", trackingType: "quota", cadence: null, target: 10 });
+    await upsertAction(A, { subGoalId, position: 2, title: "讀書", trackingType: "quota", cadence: null, timesPerPeriod: null, target: 10 });
     const [action] = await getDb()
       .select()
       .from(actions)
       .where(and(eq(actions.subGoalId, subGoalId), eq(actions.position, 2)));
 
-    assert.equal(await logOnce(A, { actionId: action!.id, trackingType: "quota", cadence: null, day: DAY, value: 2 }), true);
-    assert.equal(await logOnce(A, { actionId: action!.id, trackingType: "quota", cadence: null, day: DAY, value: 3 }), true);
+    assert.equal(await logOnce(A, { actionId: action!.id, trackingType: "quota", cadence: null, timesPerPeriod: null, day: DAY, value: 2 }), true);
+    assert.equal(await logOnce(A, { actionId: action!.id, trackingType: "quota", cadence: null, timesPerPeriod: null, day: DAY, value: 3 }), true);
 
     const rows = await getDb()
       .select()
@@ -102,7 +154,7 @@ describe("寫入路徑（真實資料庫）", { skip }, () => {
   });
 
   test("沒打過卡的行為直接刪掉，不留封存列", async () => {
-    await upsertAction(A, { subGoalId, position: 5, title: "沒打過卡", trackingType: "habit", cadence: "daily", target: null });
+    await upsertAction(A, { subGoalId, position: 5, title: "沒打過卡", trackingType: "habit", cadence: "daily", timesPerPeriod: 1, target: null });
     const [action] = await getDb()
       .select()
       .from(actions)
@@ -114,12 +166,12 @@ describe("寫入路徑（真實資料庫）", { skip }, () => {
   });
 
   test("打過卡的行為改成封存，紀錄一筆都不能少", async () => {
-    await upsertAction(A, { subGoalId, position: 6, title: "打過卡", trackingType: "habit", cadence: "daily", target: null });
+    await upsertAction(A, { subGoalId, position: 6, title: "打過卡", trackingType: "habit", cadence: "daily", timesPerPeriod: 1, target: null });
     const [action] = await getDb()
       .select()
       .from(actions)
       .where(and(eq(actions.subGoalId, subGoalId), eq(actions.position, 6)));
-    await logOnce(A, { actionId: action!.id, trackingType: "habit", cadence: "daily", day: DAY, value: 1 });
+    await logOnce(A, { actionId: action!.id, trackingType: "habit", cadence: "daily", timesPerPeriod: 1, day: DAY, value: 1 });
 
     assert.equal(await removeAction(A, action!.id), "archived");
     const [row] = await getDb().select().from(actions).where(eq(actions.id, action!.id));
@@ -131,7 +183,7 @@ describe("寫入路徑（真實資料庫）", { skip }, () => {
 
   test("封存過的格子不佔位置，重填會拿到全新的一列", async () => {
     // 承上：position 6 已經有一列封存的行為，條件式唯一索引應該讓新的一列插得進去。
-    await upsertAction(A, { subGoalId, position: 6, title: "重新填", trackingType: "milestone", cadence: null, target: null });
+    await upsertAction(A, { subGoalId, position: 6, title: "重新填", trackingType: "milestone", cadence: null, timesPerPeriod: null, target: null });
 
     const live = await getDb()
       .select()
@@ -173,13 +225,13 @@ describe("寫入路徑（真實資料庫）", { skip }, () => {
 
   test("B 不能在 A 的次目標底下寫行為", async () => {
     await assert.rejects(
-      () => upsertAction(B, { subGoalId, position: 7, title: "入侵", trackingType: "milestone", cadence: null, target: null }),
+      () => upsertAction(B, { subGoalId, position: 7, title: "入侵", trackingType: "milestone", cadence: null, timesPerPeriod: null, target: null }),
       NotYours,
     );
   });
 
   test("B 看不到也打不了 A 的行為", async () => {
-    await upsertAction(A, { subGoalId, position: 3, title: "A 的行為", trackingType: "habit", cadence: "daily", target: null });
+    await upsertAction(A, { subGoalId, position: 3, title: "A 的行為", trackingType: "habit", cadence: "daily", timesPerPeriod: 1, target: null });
     const [action] = await getDb()
       .select()
       .from(actions)
@@ -187,11 +239,17 @@ describe("寫入路徑（真實資料庫）", { skip }, () => {
 
     assert.equal(await findAction(B, action!.id), undefined, "findAction 要當它不存在");
     await assert.rejects(
-      () => logOnce(B, { actionId: action!.id, trackingType: "habit", cadence: "daily", day: DAY, value: 1 }),
+      () => logOnce(B, { actionId: action!.id, trackingType: "habit", cadence: "daily", timesPerPeriod: 1, day: DAY, value: 1 }),
       NotYours,
     );
     const rows = await getDb().select().from(logs).where(eq(logs.actionId, action!.id));
     assert.equal(rows.length, 0, "被擋下就不能留下紀錄");
+
+    // 撤銷也是寫入，同一條鐵則：B 不能用 A 的 actionId 刪掉 A 的紀錄。
+    await logOnce(A, { actionId: action!.id, trackingType: "habit", cadence: "daily", timesPerPeriod: 1, day: DAY, value: 1 });
+    await assert.rejects(() => undoLog(B, action!.id, DAY), NotYours);
+    const mine = await getDb().select().from(logs).where(eq(logs.actionId, action!.id));
+    assert.equal(mine.length, 1, "A 的紀錄要還在");
   });
 
   test("B 不能移除 A 的次目標或行為", async () => {
@@ -230,9 +288,9 @@ describe("寫入路徑（真實資料庫）", { skip }, () => {
       .select()
       .from(subGoals)
       .where(and(eq(subGoals.planId, planId), eq(subGoals.position, 5), isNull(subGoals.archivedAt)));
-    await upsertAction(A, { subGoalId: sg!.id, position: 0, title: "底下的行為", trackingType: "habit", cadence: "daily", target: null });
+    await upsertAction(A, { subGoalId: sg!.id, position: 0, title: "底下的行為", trackingType: "habit", cadence: "daily", timesPerPeriod: 1, target: null });
     const [act] = await getDb().select().from(actions).where(eq(actions.subGoalId, sg!.id));
-    await logOnce(A, { actionId: act!.id, trackingType: "habit", cadence: "daily", day: DAY, value: 1 });
+    await logOnce(A, { actionId: act!.id, trackingType: "habit", cadence: "daily", timesPerPeriod: 1, day: DAY, value: 1 });
 
     assert.equal(await removeSubGoal(A, sg!.id), "archived");
     const [sgAfter] = await getDb().select().from(subGoals).where(eq(subGoals.id, sg!.id));

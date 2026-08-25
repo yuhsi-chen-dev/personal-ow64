@@ -95,16 +95,25 @@ test("累計型沒有目標數量就收不了——那個數字猜不得", () =>
 
 test("矛盾的欄位組合會被清掉，不會整批驗證失敗", () => {
   // 模型很愛給「里程碑 + 每日」這種東西
-  const m = normalizeAction(act({ trackingType: "milestone", cadence: "daily", target: 5 }));
-  assert.deepEqual(m, { title: "做一件事", why: "有用", trackingType: "milestone", cadence: null, target: null });
+  const m = normalizeAction(act({ trackingType: "milestone", cadence: "daily", timesPerPeriod: 3, target: 5 }));
+  assert.deepEqual(m, {
+    title: "做一件事", why: "有用", trackingType: "milestone",
+    cadence: null, timesPerPeriod: null, target: null,
+  });
   const q = normalizeAction(act({ trackingType: "mantra", cadence: "weekly", target: 3 }));
   assert.equal(q?.cadence, null);
+  assert.equal(q?.timesPerPeriod, null);
   assert.equal(q?.target, null);
+});
+
+test("習慣型的次數沒給就當一次，給了就照用", () => {
+  assert.equal(normalizeAction(act({ trackingType: "habit", cadence: "weekly" }))?.timesPerPeriod, 1);
+  assert.equal(normalizeAction(act({ trackingType: "habit", cadence: "weekly", timesPerPeriod: 3 }))?.timesPerPeriod, 3);
 });
 
 test("收斂後的組合要能通過真正的關卡 actionInput", () => {
   for (const s of [
-    act({ trackingType: "habit", cadence: "weekly" }),
+    act({ trackingType: "habit", cadence: "weekly", timesPerPeriod: 3 }),
     act({ trackingType: "quota", target: 800 }),
     act({ trackingType: "milestone" }),
     act({ trackingType: "mantra" }),
@@ -113,7 +122,7 @@ test("收斂後的組合要能通過真正的關卡 actionInput", () => {
     assert.ok(n, `${s.trackingType} 應該收得了`);
     const parsed = actionInput.safeParse({
       subGoalId: "sg", position: 0, title: n!.title,
-      trackingType: n!.trackingType, cadence: n!.cadence, target: n!.target,
+      trackingType: n!.trackingType, cadence: n!.cadence, timesPerPeriod: n!.timesPerPeriod, target: n!.target,
     });
     assert.equal(parsed.success, true, `${s.trackingType} 收斂後仍過不了 actionInput`);
   }

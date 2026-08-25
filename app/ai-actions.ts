@@ -205,6 +205,7 @@ export async function suggestActions(planId: string, slot: number): Promise<Sugg
         why: value.why,
         trackingType: value.trackingType,
         cadence: value.cadence,
+        timesPerPeriod: value.timesPerPeriod,
         target: value.target,
       })),
     };

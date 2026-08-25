@@ -29,7 +29,7 @@ export const subGoalInput = z.object({
 });
 
 /**
- * cadence 只有 habit 用得到、target 只有 quota 用得到，
+ * cadence 與 timesPerPeriod 只有 habit 用得到、target 只有 quota 用得到，
  * 所以用 discriminated union 綁在 trackingType 上，不要拆成兩次獨立驗證。
  */
 export const actionInput = z.intersection(
@@ -38,15 +38,24 @@ export const actionInput = z.intersection(
     z.object({
       trackingType: z.literal("habit"),
       cadence: z.enum(["daily", "weekly", "monthly"], { error: "習慣要選頻率" }),
+      // 一期要做幾次。上限 99 只是擋離譜輸入，不是領域規則。
+      timesPerPeriod: z.number({ error: "次數要是數字" }).int("次數要是整數").min(1, "次數至少 1").max(99, "一期最多 99 次").default(1),
       target: z.null().default(null),
     }),
     z.object({
       trackingType: z.literal("quota"),
       cadence: z.null().default(null),
+      timesPerPeriod: z.null().default(null),
       target: z.number({ error: "選「累計」時要填目標數量" }).int("目標數量要是整數").positive("目標數量要大於 0"),
     }),
-    z.object({ trackingType: z.literal("milestone"), cadence: z.null().default(null), target: z.null().default(null) }),
-    z.object({ trackingType: z.literal("mantra"), cadence: z.null().default(null), target: z.null().default(null) }),
+    z.object({
+      trackingType: z.literal("milestone"),
+      cadence: z.null().default(null), timesPerPeriod: z.null().default(null), target: z.null().default(null),
+    }),
+    z.object({
+      trackingType: z.literal("mantra"),
+      cadence: z.null().default(null), timesPerPeriod: z.null().default(null), target: z.null().default(null),
+    }),
   ]),
 );
 
@@ -76,6 +85,9 @@ export const logInput = z
     if (v.trackingType === "milestone" && v.value !== 1) bad("里程碑只有完成與否，value 恆為 1");
     if (v.trackingType === "quota" && v.value <= 0) bad("累計型的數量要大於 0");
   });
+
+/** 撤銷某一天的最後一筆打卡。day 跟打卡時一樣是使用者當地的日曆日，一樣要驗。 */
+export const undoInput = z.object({ actionId: z.string().min(1), day });
 
 export type PlanInput = z.infer<typeof planInput>;
 export type RemoveInput = z.infer<typeof removeInput>;

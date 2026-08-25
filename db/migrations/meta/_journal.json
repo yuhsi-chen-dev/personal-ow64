@@ -29,6 +29,13 @@
       "when": 1787489732644,
       "tag": "0003_plan_owner",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787662000045,
+      "tag": "0004_habit_times_per_period",
+      "breakpoints": true
     }
   ]
 }

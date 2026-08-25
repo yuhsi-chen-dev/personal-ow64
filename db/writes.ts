@@ -4,7 +4,7 @@
 // **每一支都吃 userId，而且 userId 一定要進到 WHERE 或先過守衛。**
 // 這不是防守性程式碼，是這個 app 的鐵則：只在讀取端過濾擋不住「直接 POST 別人的 id」。
 // 見 docs/decisions/0011-multi-tenant.md 與 CLAUDE.md 的限制。
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "./index.ts";
 import { actions, logs, plans, subGoals } from "./schema.ts";
 import { periodKey, type Cadence } from "../lib/day.ts";
@@ -83,16 +83,16 @@ export async function upsertSubGoal(userId: string, { planId, position, title }:
 
 export async function upsertAction(
   userId: string,
-  { subGoalId, position, title, trackingType, cadence, target }: ActionInput,
+  { subGoalId, position, title, trackingType, cadence, timesPerPeriod, target }: ActionInput,
 ) {
   await assertOwnsSubGoal(userId, subGoalId);
   await getDb()
     .insert(actions)
-    .values({ id: crypto.randomUUID(), subGoalId, position, title, trackingType, cadence, target })
+    .values({ id: crypto.randomUUID(), subGoalId, position, title, trackingType, cadence, timesPerPeriod, target })
     .onConflictDoUpdate({
       target: [actions.subGoalId, actions.position],
       targetWhere: isNull(actions.archivedAt),
-      set: { title, trackingType, cadence, target },
+      set: { title, trackingType, cadence, timesPerPeriod, target },
     });
 }
 
@@ -103,6 +103,7 @@ export async function findAction(userId: string, id: string) {
       id: actions.id,
       trackingType: actions.trackingType,
       cadence: actions.cadence,
+      timesPerPeriod: actions.timesPerPeriod,
       target: actions.target,
     })
     .from(actions)
@@ -124,21 +125,49 @@ export async function findAction(userId: string, id: string) {
  */
 export async function logOnce(
   userId: string,
-  { actionId, trackingType, cadence, day, value }: LogInput & { cadence: Cadence | null },
+  { actionId, trackingType, cadence, timesPerPeriod, day, value }: LogInput & {
+    cadence: Cadence | null;
+    timesPerPeriod: number | null;
+  },
 ): Promise<boolean> {
   await assertOwnsAction(userId, actionId);
   if (trackingType === "mantra") return false;
 
   if (trackingType === "habit" || trackingType === "milestone") {
     const existing = await getDb().select({ day: logs.day }).from(logs).where(eq(logs.actionId, actionId));
+    // 習慣型的上限是「一期 timesPerPeriod 次」，不是「一期一次」——
+    // 每週跑 3 次的人第二次按下去必須記得進來。
+    const key = periodKey(day, cadence ?? "daily");
     const already =
       trackingType === "milestone"
         ? existing.length > 0
-        : existing.some((l) => periodKey(l.day, cadence ?? "daily") === periodKey(day, cadence ?? "daily"));
+        : existing.filter((l) => periodKey(l.day, cadence ?? "daily") === key).length >= Math.max(1, timesPerPeriod ?? 1);
     if (already) return false;
   }
 
   await getDb().insert(logs).values({ id: crypto.randomUUID(), actionId, day, value });
+  return true;
+}
+
+/**
+ * 撤銷某一天的最後一筆紀錄。回傳有沒有真的刪掉。
+ *
+ * **只動 `day` 當天的最後一筆，不是「這一期」的最後一筆。** 誤觸就是當下發生的事，
+ * 範圍收在今天，撤銷鍵才不會在使用者沒看見的地方刪掉三天前的紀錄——
+ * 歷史紀錄不能被遺失或覆蓋是這個 app 的第一優先序（見 CLAUDE.md）。
+ *
+ * 按 occurredAt 由新到舊取一筆，不是整天全刪：一天記三次的人只想收回剛剛那一次。
+ */
+export async function undoLog(userId: string, actionId: string, day: string): Promise<boolean> {
+  await assertOwnsAction(userId, actionId);
+  const [last] = await getDb()
+    .select({ id: logs.id })
+    .from(logs)
+    .where(and(eq(logs.actionId, actionId), eq(logs.day, day)))
+    .orderBy(desc(logs.occurredAt))
+    .limit(1);
+  if (!last) return false;
+  await getDb().delete(logs).where(eq(logs.id, last.id));
   return true;
 }
 

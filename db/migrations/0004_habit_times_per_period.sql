@@ -1,0 +1,1 @@
+ALTER TABLE "actions" ADD COLUMN "times_per_period" integer;

@@ -113,7 +113,7 @@ ${already}
 /**
  * 模型回傳的一項行為建議。
  *
- * 刻意寫成**扁平**的：`cadence` 與 `target` 各自只對一種 trackingType 有意義，
+ * 刻意寫成**扁平**的：`cadence`／`timesPerPeriod` 與 `target` 各自只對一種 trackingType 有意義，
  * 但 Gemini 吃的 JSON Schema 子集不含 `oneOf` 的可靠支援，硬要 discriminated union
  * 是在賭。所以模型端收寬的，收下來之後用 normalizeAction 收斂，
  * 最後寫入時再過 lib/schemas.ts 的 actionInput——那才是真正的關卡。
@@ -122,6 +122,7 @@ export const actionSuggestion = z.object({
   title: z.string().trim().min(1).max(60),
   trackingType: z.enum(["habit", "quota", "milestone", "mantra"]),
   cadence: z.enum(["daily", "weekly", "monthly"]).nullish(),
+  timesPerPeriod: z.number().int().min(1).max(99).nullish(),
   target: z.number().int().positive().nullish(),
   why: z.string().trim().min(1).max(120),
 });
@@ -136,6 +137,7 @@ export type NormalizedAction = {
   why: string;
   trackingType: ActionSuggestion["trackingType"];
   cadence: "daily" | "weekly" | "monthly" | null;
+  timesPerPeriod: number | null;
   target: number | null;
 };
 
@@ -154,13 +156,20 @@ export function normalizeAction(s: ActionSuggestion): NormalizedAction | null {
   switch (s.trackingType) {
     case "habit":
       // 頻率沒給就當每日。這個預設是安全的：分母變大只會讓進度看起來保守。
-      return { ...base, trackingType: "habit", cadence: s.cadence ?? "daily", target: null };
+      // 次數沒給就當一次，同理。
+      return {
+        ...base,
+        trackingType: "habit",
+        cadence: s.cadence ?? "daily",
+        timesPerPeriod: s.timesPerPeriod ?? 1,
+        target: null,
+      };
     case "quota":
       if (!s.target || s.target <= 0) return null;
-      return { ...base, trackingType: "quota", cadence: null, target: s.target };
+      return { ...base, trackingType: "quota", cadence: null, timesPerPeriod: null, target: s.target };
     case "milestone":
     case "mantra":
-      return { ...base, trackingType: s.trackingType, cadence: null, target: null };
+      return { ...base, trackingType: s.trackingType, cadence: null, timesPerPeriod: null, target: null };
   }
 }
 
@@ -180,11 +189,12 @@ export const actionResponseSchema = {
             description: "habit=固定頻率重複做；quota=朝一個總量前進；milestone=做完一次就結束；mantra=銘記在心不追蹤",
           },
           cadence: { type: "string", enum: ["daily", "weekly", "monthly"], description: "只有 habit 要填" },
+          timesPerPeriod: { type: "integer", description: "只有 habit 要填，一期要做幾次，預設 1" },
           target: { type: "integer", description: "只有 quota 要填，是一個正整數的總量" },
           why: { type: "string", description: "一句話說明這一項為什麼有用" },
         },
         required: ["title", "trackingType", "why"],
-        propertyOrdering: ["title", "trackingType", "cadence", "target", "why"],
+        propertyOrdering: ["title", "trackingType", "cadence", "timesPerPeriod", "target", "why"],
       },
     },
   },
@@ -217,7 +227,9 @@ export function actionPrompt(input: {
 ${already}
 請提出 ${need} 項具體行為。每一項都要標上追蹤方式，四選一：
 
-- **habit** 固定頻率重複做的事。要附 cadence：daily／weekly／monthly。
+- **habit** 固定頻率重複做的事。要附 cadence：daily／weekly／monthly，
+  一期要做不只一次就附 timesPerPeriod。
+  例：「每週跑 3 次」→ habit + weekly + timesPerPeriod 3（**不是** daily）。
   例：「每週跑一次 15 公里以上」→ habit + weekly。
 - **quota** 朝一個總量前進。要附 target（正整數）。
   例：「累積跑滿 800 公里」→ quota + target 800。

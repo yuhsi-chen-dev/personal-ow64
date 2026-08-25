@@ -1,19 +1,19 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Check, Flag, Flame, Grid3x3, Hash, Plus, Quote, Repeat, Sparkles, Trash2, X } from "lucide-react";
-import { ActionForm } from "@/app/action-form.tsx";
+import { Check, Flag, Flame, Grid3x3, Hash, Plus, Quote, Repeat, Sparkles, Trash2, Undo2, X } from "lucide-react";
+import { ActionForm, Saved, type FormState } from "@/app/action-form.tsx";
 import { ConfirmButton } from "@/app/confirm-button.tsx";
 import { useToday } from "@/app/use-today.ts";
 import {
-  acceptActions, acceptSubGoals, logProgress, removeActionCell, removeSubGoalCell,
+  acceptActions, acceptSubGoals, logProgress, removeActionCell, removeSubGoalCell, undoProgress,
   renamePlanTitle, saveAction, saveSubGoal,
 } from "@/app/actions.ts";
 import {
   suggestActions, suggestSubGoals, type ActionSuggestionAt, type Suggestion,
 } from "@/app/ai-actions.ts";
 import {
-  blockOfCell, buildBoard, heat, recentPeriods, streak, toBlocks,
+  blockOfCell, buildBoard, cellAction, heat, recentPeriods, streak, toBlocks,
   type BoardAction, type BoardSubGoal, type Cell,
 } from "@/lib/board.ts";
 import { SLOTS, slotOfBlock } from "@/lib/mandala.ts";
@@ -157,6 +157,7 @@ export function PlanBoard({ planId, planTitle, subGoals, actions, logs, rangeDay
                 title: x.title,
                 trackingType: x.trackingType,
                 cadence: x.cadence,
+                timesPerPeriod: x.timesPerPeriod,
                 target: x.target,
               })),
             );
@@ -501,8 +502,10 @@ function CheckStrip({
   return (
     <ActionForm action={logProgress} compact className={`absolute inset-x-0 bottom-0 z-10 overflow-hidden ${STRIP.height}`}>
       {({ pending }) => {
-        // 樂觀回饋：按下去立刻變成完成的樣子，不等伺服器回來。
-        const done = cell.doneNow || (pending && !quota);
+        // 樂觀回饋：按下去立刻加一次，不等伺服器回來。一期要三次的只會走到 1/3，
+        // 不會整條變成「已完成」。
+        const optimistic = { ...cell, periodDone: cell.periodDone + (pending && !quota ? 1 : 0) };
+        const done = cell.doneNow || (pending && !quota && optimistic.periodDone >= cell.periodNeed);
         return (
           <>
           <input type="hidden" name="planId" value={planId} />
@@ -518,7 +521,7 @@ function CheckStrip({
             style={done ? { backgroundColor: slotColor(cell.slot) } : undefined}
           >
             {quota ? <Plus size={13} strokeWidth={3} /> : <Check size={13} strokeWidth={3} />}
-            {quickLabel({ ...cell, doneNow: done }, true)}
+            {quickLabel({ ...optimistic, doneNow: done }, true)}
           </button>
           </>
         );
@@ -529,8 +532,15 @@ function CheckStrip({
 
 /** short 是給格子上那條用的：60 幾 px 放不下「本週已完成」，期間字樣讓給面板。 */
 function quickLabel(cell: Extract<Cell, { kind: "action" }>, short = false) {
-  if (cell.trackingType === "quota") return "＋1";
+  // 鍵上已經有一個＋圖示了，字裡不要再放一個。
+  if (cell.trackingType === "quota") return "加一次";
   if (cell.trackingType === "milestone") return cell.doneNow ? "已完成" : short ? "完成" : "標記完成";
+  // 一期要做好幾次的，數字比「記一次」有用得多——沒有它就不知道這週還差幾次。
+  // 窄條上只放得下數字，期間字樣讓給面板。
+  if (cell.periodNeed > 1) {
+    const n = `${cell.periodDone}/${cell.periodNeed}`;
+    return short ? n : `${THIS_PERIOD[cell.cadence ?? "daily"]} ${n}`;
+  }
   if (cell.doneNow) return short ? "已完成" : `${THIS_PERIOD[cell.cadence ?? "daily"]}已完成`;
   return "記一次";
 }
@@ -628,9 +638,38 @@ function panelTitle(cell: Cell) {
   return `次目標 ${cell.slot + 1} ・ 行為 ${cell.index + 1}`;
 }
 
-const inputCls = "w-full rounded-xl border border-line bg-bg px-3 py-2 text-sm outline-none focus:border-accent";
+/**
+ * 輸入框。**刻意不含 `w-full`**：同權重的寬度 utility 由樣式表順序決勝而不是 class
+ * 字串順序，帶著 `w-full` 的話呼叫端寫 `w-14`／`flex-1` 會被它蓋掉，排成一列就爆版。
+ * 表單本身是 flex flex-col，不給寬度也會 stretch 成滿寬。
+ */
+const inputCls = "min-w-0 rounded-xl border border-line bg-bg px-3 py-2 text-sm outline-none focus:border-accent";
 const labelCls = "text-xs text-dim";
-const submitCls = "lift mt-1 rounded-xl bg-accent px-4 py-2 text-sm font-medium text-black cursor-pointer";
+const submitCls =
+  "lift w-full rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-black cursor-pointer disabled:cursor-default disabled:opacity-60";
+
+/**
+ * 儲存鍵。三個表單共用，不要各寫一份。
+ *
+ * pending 時鍵本身改字並鎖住，成功後旁邊閃一下「已儲存」——
+ * 少了這兩個回饋，使用者按下去畫面沒動，分不出「沒按到」與「按到了但沒反應」。
+ */
+function SaveButton({ pending, saved }: FormState) {
+  return (
+    // 「已儲存」蓋在鍵上淡出，不佔自己的位置——排在旁邊的話面板一窄就把鍵擠爆版。
+    <div className="relative mt-1">
+      <button type="submit" disabled={pending} className={submitCls}>
+        {pending ? "儲存中…" : "儲存"}
+      </button>
+      {saved > 0 ? (
+        <Saved
+          key={saved}
+          className="absolute inset-0 flex items-center justify-center rounded-xl bg-accent text-sm text-black"
+        />
+      ) : null}
+    </div>
+  );
+}
 
 function PanelBody({ cell, planId, logs, today }: { cell: Cell; planId: string; logs: Log[]; today: string }) {
   // 追蹤方式決定要顯示哪些欄位，所以得留在元件狀態裡；
@@ -641,16 +680,20 @@ function PanelBody({ cell, planId, logs, today }: { cell: Cell; planId: string; 
     return (
       <div className="flex flex-col gap-4">
         <ActionForm action={renamePlanTitle} className="flex flex-col gap-2">
-          <input type="hidden" name="planId" value={planId} />
-          <label className={labelCls}>核心目標</label>
-          <textarea
-            name="title"
-            defaultValue={cell.title}
-            rows={2}
-            className={`${inputCls} resize-none`}
-            placeholder="例如：2027 年跑完一場全馬"
-          />
-          <button type="submit" className={submitCls}>儲存</button>
+          {(state) => (
+            <>
+              <input type="hidden" name="planId" value={planId} />
+              <label className={labelCls}>核心目標</label>
+              <textarea
+                name="title"
+                defaultValue={cell.title}
+                rows={2}
+                className={`${inputCls} resize-none`}
+                placeholder="例如：2027 年跑完一場全馬"
+              />
+              <SaveButton {...state} />
+            </>
+          )}
         </ActionForm>
         <Meter value={cell.progress} color="var(--accent)" />
         <p className="text-xs text-dim">整體進度由底下的行為往上彙總，信念型不列入計算。</p>
@@ -663,13 +706,17 @@ function PanelBody({ cell, planId, logs, today }: { cell: Cell; planId: string; 
     return (
       <div className="flex flex-col gap-4">
         <ActionForm action={saveSubGoal} className="flex flex-col gap-2">
-          <input type="hidden" name="planId" value={planId} />
-          <input type="hidden" name="position" value={cell.slot} />
-          <label className={labelCls}>名稱</label>
-          <input name="title" defaultValue={cell.title} placeholder="例如：閱讀" className={inputCls} />
-          <Meter value={cell.progress} color={slotColor(cell.slot)} />
-          <p className="text-xs text-dim">底下行為的平均</p>
-          <button type="submit" className={submitCls}>儲存</button>
+          {(state) => (
+            <>
+              <input type="hidden" name="planId" value={planId} />
+              <input type="hidden" name="position" value={cell.slot} />
+              <label className={labelCls}>名稱</label>
+              <input name="title" defaultValue={cell.title} placeholder="例如：閱讀" className={inputCls} />
+              <Meter value={cell.progress} color={slotColor(cell.slot)} />
+              <p className="text-xs text-dim">底下行為的平均</p>
+              <SaveButton {...state} />
+            </>
+          )}
         </ActionForm>
         {cell.id ? (
           <RemoveCell action={removeSubGoalCell} id={cell.id} planId={planId} note="底下 8 項行為會一起收起來。" />
@@ -683,64 +730,94 @@ function PanelBody({ cell, planId, logs, today }: { cell: Cell; planId: string; 
   }
 
   const id = cell.id;
-  const track = { trackingType: cell.trackingType, cadence: cell.cadence };
-  const periods = id ? recentPeriods(logs, { id, ...track }, today) : [];
-  const run = id ? streak(logs, { id, ...track }, today) : 0;
+  const track = id ? cellAction(cell, id) : null;
+  const periods = track ? recentPeriods(logs, track, today) : [];
+  const run = track ? streak(logs, track, today) : 0;
+  // 撤銷的範圍是「今天」，所以這裡數的是當天筆數，不是本期筆數。
+  const todayCount = id ? logs.filter((l) => l.actionId === id && l.day === today).length : 0;
 
   return (
     <div className="flex flex-col gap-5">
       <ActionForm action={saveAction} className="flex flex-col gap-2">
-        <input type="hidden" name="planId" value={planId} />
-        <input type="hidden" name="subGoalId" value={cell.subGoalId} />
-        <input type="hidden" name="position" value={cell.index} />
-        <input type="hidden" name="trackingType" value={type} />
-
-        <label className={labelCls}>具體行為</label>
-        <input name="title" defaultValue={cell.title} placeholder="例如：每天讀 20 分鐘" className={inputCls} />
-
-        <label className={labelCls}>這是哪一種</label>
-        <div className="grid grid-cols-2 gap-1.5">
-          {(Object.keys(TYPE) as TrackingType[]).map((t) => {
-            const { label, Icon } = TYPE[t];
-            const on = type === t;
-            return (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setType(t)}
-                aria-pressed={on}
-                className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-xs cursor-pointer transition ${
-                  on ? "border-transparent text-black" : "border-line text-dim hover:text-text"
-                }`}
-                style={on ? { backgroundColor: slotColor(cell.slot) } : undefined}
-              >
-                <Icon size={13} />
-                {label}
-              </button>
-            );
-          })}
-        </div>
-        <p className="text-xs text-dim/80">{TYPE[type].hint}</p>
-
-        {type === "habit" ? (
+        {(state) => (
           <>
-            <label className={labelCls}>頻率</label>
-            <select name="cadence" defaultValue={cell.cadence ?? "daily"} className={inputCls}>
-              {(Object.keys(CADENCE) as Cadence[]).map((c) => (
-                <option key={c} value={c}>{CADENCE[c]}一次</option>
-              ))}
-            </select>
-          </>
-        ) : null}
+            <input type="hidden" name="planId" value={planId} />
+            <input type="hidden" name="subGoalId" value={cell.subGoalId} />
+            <input type="hidden" name="position" value={cell.index} />
+            <input type="hidden" name="trackingType" value={type} />
 
-        {type === "quota" ? (
-          <>
-            <label className={labelCls}>目標數量</label>
-            <input name="target" type="number" min="1" defaultValue={cell.target ?? ""} placeholder="例如 10" className={inputCls} />
-          </>
-        ) : null}
+            <label className={labelCls}>具體行為</label>
+            <input name="title" defaultValue={cell.title} placeholder="例如：每天讀 20 分鐘" className={inputCls} />
 
-        <button type="submit" className={submitCls}>儲存</button>
+            <label className={labelCls}>這是哪一種</label>
+            <div className="grid grid-cols-2 gap-1.5">
+              {(Object.keys(TYPE) as TrackingType[]).map((t) => {
+                const { label, Icon } = TYPE[t];
+                const on = type === t;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setType(t)}
+                    aria-pressed={on}
+                    className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-xs cursor-pointer transition ${
+                      on ? "border-transparent text-black" : "border-line text-dim hover:text-text"
+                    }`}
+                    style={on ? { backgroundColor: slotColor(cell.slot) } : undefined}
+                  >
+                    <Icon size={13} />
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-xs text-dim/80">{TYPE[type].hint}</p>
+
+            {type === "habit" ? (
+              <>
+                <label className={labelCls}>頻率</label>
+                {/*
+                  頻率＋次數是**一個**設定，所以是一個欄位：外框長得跟上面的輸入框一樣，
+                  裡面兩個控制項脫掉自己的邊框。分成兩個有框的小方塊時，
+                  它們會讀成兩張各自為政的籤，跟表單其他欄位也對不齊。
+                */}
+                <div className="flex items-center gap-1 rounded-xl border border-line bg-bg px-3 py-2 text-sm focus-within:border-accent">
+                  <select
+                    name="cadence"
+                    defaultValue={cell.cadence ?? "daily"}
+                    className="w-auto cursor-pointer border-0 bg-transparent pr-1 outline-none"
+                  >
+                    {(Object.keys(CADENCE) as Cadence[]).map((c) => (
+                      <option key={c} value={c}>{CADENCE[c]}</option>
+                    ))}
+                  </select>
+                  <span className="shrink-0 text-dim">做</span>
+                  <input
+                    name="timesPerPeriod"
+                    type="number"
+                    min="1"
+                    max="99"
+                    defaultValue={cell.periodNeed}
+                    aria-label="一期做幾次"
+                    // 上下箭頭在這種內嵌欄位裡只是雜訊，數字本來就用打的；
+                    // type 留著 number，手機才會跳數字鍵盤。
+                    className="w-10 shrink-0 border-0 bg-transparent text-center tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                  <span className="shrink-0 text-dim">次</span>
+                </div>
+              </>
+            ) : null}
+
+            {type === "quota" ? (
+              <>
+                <label className={labelCls}>目標數量</label>
+                <input name="target" type="number" min="1" defaultValue={cell.target ?? ""} placeholder="例如 10" className={inputCls} />
+              </>
+            ) : null}
+
+            <SaveButton {...state} />
+          </>
+        )}
       </ActionForm>
 
       {cell.id ? (
@@ -758,7 +835,9 @@ function PanelBody({ cell, planId, logs, today }: { cell: Cell; planId: string; 
                   return <Icon size={13} />;
                 })()}
                 {TYPE[cell.trackingType].label}
-                {cell.trackingType === "habit" ? `・${CADENCE[cell.cadence ?? "daily"]}` : null}
+                {cell.trackingType === "habit"
+                  ? `・${CADENCE[cell.cadence ?? "daily"]}${cell.periodNeed > 1 ? ` ${cell.periodNeed} 次` : ""}`
+                  : null}
                 {cell.trackingType === "quota" && cell.target ? `・目標 ${cell.target}` : null}
               </span>
               {run > 0 ? (
@@ -788,6 +867,8 @@ function PanelBody({ cell, planId, logs, today }: { cell: Cell; planId: string; 
             ) : null}
 
             <RecordForm cell={cell} planId={planId} today={today} />
+
+            {todayCount > 0 && id ? <UndoRow actionId={id} planId={planId} today={today} count={todayCount} /> : null}
           </div>
         )
       ) : (
@@ -842,25 +923,66 @@ function Meter({ value, color }: { value: number | null; color: string }) {
   );
 }
 
+/**
+ * 誤觸的後悔鍵：撤銷今天的最後一筆。
+ *
+ * 沒有兩段式確認——撤銷本身就是後悔鍵，再問一次只是多一步；撤錯了再按一次打卡就好。
+ * 只在今天真的有紀錄時才出現，不然它就是一顆按了會出錯的死鍵。
+ */
+function UndoRow({
+  actionId, planId, today, count,
+}: { actionId: string; planId: string; today: string; count: number }) {
+  return (
+    <ActionForm action={undoProgress} className="flex items-center justify-between gap-2">
+      {({ pending }) => (
+        <>
+          <input type="hidden" name="planId" value={planId} />
+          <input type="hidden" name="actionId" value={actionId} />
+          <input type="hidden" name="day" value={today} />
+          <span className="text-xs text-dim">今天記了 {count} 次</span>
+          <button
+            type="submit"
+            disabled={pending}
+            className="-mr-1 flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs text-dim cursor-pointer transition hover:text-text disabled:cursor-default disabled:opacity-50"
+          >
+            <Undo2 size={12} />
+            {pending ? "撤銷中…" : "撤銷"}
+          </button>
+        </>
+      )}
+    </ActionForm>
+  );
+}
+
 function RecordForm({
   cell, planId, today,
 }: { cell: Extract<Cell, { kind: "action" }>; planId: string; today: string }) {
   const quota = cell.trackingType === "quota";
   return (
+    // 沒有「已記錄」的閃字：底下那行「今天記了 N 次」本身就是回饋，
+    // 多一行淡出的字只會讓面板抖一下。
     <ActionForm action={logProgress} className="flex items-center gap-2">
-      <input type="hidden" name="planId" value={planId} />
-      <input type="hidden" name="actionId" value={cell.id} />
-      <input type="hidden" name="day" value={today} />
-      {quota ? <input name="value" type="number" step="any" min="1" placeholder="數量" className={`${inputCls} w-24`} /> : null}
-      <button
-        type="submit"
-        disabled={!today}
-        className="lift flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium cursor-pointer disabled:opacity-50"
-        style={{ borderColor: slotColor(cell.slot), color: slotColor(cell.slot) }}
-      >
-        {quota ? <Plus size={14} strokeWidth={2.5} /> : <Check size={14} strokeWidth={2.5} />}
-        {quota ? "記錄" : quickLabel(cell)}
-      </button>
+      {({ pending }) => (
+        <>
+          <input type="hidden" name="planId" value={planId} />
+          <input type="hidden" name="actionId" value={cell.id} />
+          <input type="hidden" name="day" value={today} />
+          {quota ? (
+            <input name="value" type="number" step="any" min="1" placeholder="數量" className={`${inputCls} flex-1`} />
+          ) : null}
+          <button
+            type="submit"
+            disabled={!today || pending}
+            className={`lift flex items-center justify-center gap-1.5 rounded-xl border py-2.5 text-sm font-medium cursor-pointer disabled:opacity-50 ${
+              quota ? "shrink-0 whitespace-nowrap px-4" : "w-full px-3"
+            }`}
+            style={{ borderColor: slotColor(cell.slot), color: slotColor(cell.slot) }}
+          >
+            {quota ? <Plus size={14} strokeWidth={2.5} /> : <Check size={14} strokeWidth={2.5} />}
+            {quota ? "記錄" : quickLabel(cell)}
+          </button>
+        </>
+      )}
     </ActionForm>
   );
 }

@@ -48,6 +48,31 @@ test("同一週期內重複打卡只算一次", () => {
   assert.equal(actionProgress(weekly, sameWeek, W), actionProgress(weekly, [log("w", "2026-08-24")], W));
 });
 
+test("一期要做 N 次：分子分母同時乘 N，做滿才是 100%", () => {
+  const thrice = { id: "w", trackingType: "habit" as const, cadence: "weekly" as const, timesPerPeriod: 3 };
+  // 30 天 = 5 週，一週 3 次 → 分母 15。
+  const weeks = ["2026-08-03", "2026-08-10", "2026-08-17", "2026-08-24", "2026-08-31"];
+  const once = weeks.map((d) => log("w", d));
+  assert.equal(actionProgress(thrice, once, W), 1 / 3, "每週只跑 1 次不能算滿分");
+
+  const full = weeks.flatMap((d) => [log("w", d), log("w", d), log("w", d)]);
+  assert.equal(actionProgress(thrice, full, W), 1);
+});
+
+test("一期做超過需求的次數不能補其他期的空白", () => {
+  const thrice = { id: "w", trackingType: "habit" as const, cadence: "weekly" as const, timesPerPeriod: 3 };
+  // 同一週塞 9 次，其餘四週掛零：只能算那一週的 3 次，也就是 3/15。
+  const crammed = Array.from({ length: 9 }, () => log("w", "2026-08-31"));
+  assert.equal(actionProgress(thrice, crammed, W), 3 / 15);
+});
+
+test("timesPerPeriod 沒設就等同 1，舊資料的算法不變", () => {
+  const logs = [log("w", "2026-08-31")];
+  const base = { id: "w", trackingType: "habit" as const, cadence: "weekly" as const };
+  assert.equal(actionProgress({ ...base, timesPerPeriod: null }, logs, W), actionProgress(base, logs, W));
+  assert.equal(actionProgress({ ...base, timesPerPeriod: 1 }, logs, W), actionProgress(base, logs, W));
+});
+
 test("習慣型只看統計區間內的紀錄，久了才不會全部變 100%", () => {
   const daily = { id: "d", trackingType: "habit" as const, cadence: "daily" as const };
   const old = Array.from({ length: 40 }, (_, i) => log("d", `2026-0${i < 20 ? "6" : "7"}-${String((i % 20) + 1).padStart(2, "0")}`));
