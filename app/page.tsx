@@ -1,156 +1,17 @@
-import Link from "next/link";
-import { ArrowRight, Grid3x3, LogIn, LogOut, Sparkles, Target, Trash2 } from "lucide-react";
 import { auth } from "@/auth.ts";
-import { listPlans } from "@/db/queries.ts";
-import { createPlan, removePlan } from "./actions.ts";
-import { signInWithGoogle, signOutOfApp } from "./auth-actions.ts";
-import { ActionForm } from "./action-form.tsx";
-import { ConfirmButton } from "./confirm-button.tsx";
-import { ThemeToggle } from "./theme-toggle.tsx";
-import { slotColor } from "@/lib/palette.ts";
+import { Landing } from "./landing.tsx";
 
-// 這頁每次請求都要讀當下的資料，不能在 build 時預渲染。
+// 登入狀態決定按鈕是「登入」還是「進入我的計劃表」，所以不能在 build 時預渲染。
 export const dynamic = "force-dynamic";
 
-/** 刪掉這份計劃表會失去什麼。整份表是 cascade 真刪，沒有復原入口，所以要把代價講清楚。 */
-function cost({ subGoals, actions, logs }: { subGoals: number; actions: number; logs: number }) {
-  // 是 0 的就不要唸出來——「0 項行為」只是雜訊，讀的人要的是還剩什麼會沒。
-  const parts = [
-    subGoals ? `${subGoals} 個次目標` : "",
-    actions ? `${actions} 項行為` : "",
-    logs ? `${logs} 筆紀錄` : "",
-  ].filter(Boolean);
-  return parts.length === 0 ? "這份還是空的" : `連同 ${parts.join("、")}`;
-}
-
+/**
+ * `/` 永遠是那張公開的入口頁，登入與否都一樣。
+ *
+ * 不在這裡把登入的人轉去 `/dashboard`：一個網址就該是一份內容，
+ * 「同一個網址對不同人長得不一樣」是把介紹頁跟應用程式擠在一起才有的問題，
+ * 而那正是搬去 `/dashboard` 要解掉的。已登入的人看到的差別只有按鈕上的字。
+ */
 export default async function Home() {
-  const session = await auth();
-  const userId = session?.user?.id;
-  // 沒登入就不查資料庫。這頁在登出狀態下是張門面，不是空的清單。
-  const plans = userId ? await listPlans(userId) : [];
-
-  return (
-    <main className="w-full mx-auto max-w-3xl px-6 py-10 md:py-16 flex flex-col gap-12">
-      <header className="flex items-start justify-between gap-4">
-        <div className="flex flex-col gap-3">
-          <span className="inline-flex items-center gap-1.5 self-start rounded-full border border-line bg-surface px-3 py-1 text-xs text-dim">
-            <Sparkles size={13} className="text-accent-text" />
-            曼陀羅計劃表
-          </span>
-          <h1 className="display text-4xl md:text-5xl font-semibold leading-[1.05]">
-            Open Window
-            <span className="ml-2 bg-gradient-to-br from-accent to-[oklch(0.68_0.17_232)] bg-clip-text text-transparent">
-              64
-            </span>
-          </h1>
-          <p className="text-dim max-w-md leading-relaxed">
-            一個核心目標，拆成 8 個次目標，再拆成 64 個具體行為。
-            然後每天把它們一格一格填滿。
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {userId ? (
-            <form action={signOutOfApp}>
-              <button
-                type="submit"
-                title={session?.user?.email ?? undefined}
-                className="lift inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-dim hover:text-text cursor-pointer"
-              >
-                <LogOut size={13} />
-                登出
-              </button>
-            </form>
-          ) : null}
-          <ThemeToggle />
-        </div>
-      </header>
-
-      {userId ? (
-      <>
-      <section className="rounded-2xl border border-line bg-surface p-6 shadow-[var(--shadow)]">
-        <ActionForm action={createPlan} className="flex flex-col gap-3">
-          <label htmlFor="title" className="flex items-center gap-2 text-sm font-medium">
-            <Target size={16} className="text-accent-text" />
-            新的計劃表：你的核心目標是什麼？
-          </label>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <input
-              id="title"
-              name="title"
-              className="flex-1 rounded-xl border border-line bg-bg px-4 py-2.5 outline-none focus:border-accent"
-              placeholder="例如：2027 年跑完一場全馬"
-            />
-            <button
-              type="submit"
-              className="lift inline-flex items-center justify-center gap-1.5 rounded-xl bg-accent px-5 py-2.5 font-medium text-black cursor-pointer"
-            >
-              建立
-              <ArrowRight size={16} />
-            </button>
-          </div>
-        </ActionForm>
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-dim">我的計劃表</h2>
-        {plans.length === 0 ? (
-          <p className="rounded-2xl border border-dashed border-line px-6 py-10 text-center text-sm text-dim">
-            還沒有任何計劃表。上面建一個，就會展開一張 9×9 的格子。
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {plans.map((p, i) => (
-              // 刪除的表單不能包在 Link 裡（互動元素不可巢狀），所以兩者並排。
-              <li
-                key={p.id}
-                // flex-wrap + basis：確認狀態多出一行字，窄螢幕上讓它整組換行，
-                // 而不是把計劃表名稱擠到看不見——正在刪哪一份是最不能被擠掉的資訊。
-                className="lift group flex flex-wrap items-center gap-y-1 rounded-2xl border border-line bg-surface pr-3 hover:shadow-[var(--shadow)]"
-              >
-                <Link href={`/plans/${p.id}`} className="flex min-w-0 grow basis-60 items-center gap-3 px-5 py-4">
-                  <span
-                    className="grid h-10 w-10 shrink-0 place-items-center rounded-xl"
-                    style={{ backgroundColor: slotColor(i, { dim: true }) }}
-                  >
-                    <Grid3x3 size={18} className="text-black/70" />
-                  </span>
-                  <span className="min-w-0 flex-1 truncate font-medium">{p.title}</span>
-                  <ArrowRight size={16} className="shrink-0 text-dim transition group-hover:translate-x-0.5" />
-                </Link>
-                <ActionForm action={removePlan} className="ml-auto shrink-0 pb-2 sm:pb-0">
-                  <input type="hidden" name="planId" value={p.id} />
-                  <ConfirmButton
-                    className="tap grid h-9 w-9 place-items-center rounded-full text-dim hover:bg-surface-2 hover:text-red-600 cursor-pointer"
-                    confirmClassName="whitespace-nowrap rounded-full bg-red-600 px-3 py-1.5 text-xs font-medium text-white cursor-pointer"
-                    idle={<Trash2 size={15} />}
-                    confirm="確定刪除"
-                    note={cost(p.counts)}
-                  />
-                </ActionForm>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-      </>
-      ) : (
-        <section className="rounded-2xl border border-line bg-surface p-8 shadow-[var(--shadow)] flex flex-col items-start gap-4">
-          <h2 className="text-lg font-medium">先登入，才有你自己的表</h2>
-          <p className="text-sm text-dim leading-relaxed">
-            每個人的計劃表只有自己看得到。登入之後就能建立第一張 9×9，
-            開始把一個目標拆成 8 個次目標、64 個具體行為。
-          </p>
-          <form action={signInWithGoogle}>
-            <button
-              type="submit"
-              className="lift inline-flex items-center gap-2 rounded-xl bg-accent px-5 py-2.5 font-medium text-black cursor-pointer"
-            >
-              <LogIn size={16} />
-              用 Google 登入
-            </button>
-          </form>
-        </section>
-      )}
-    </main>
-  );
+  const signedIn = Boolean((await auth())?.user?.id);
+  return <Landing signedIn={signedIn} />;
 }

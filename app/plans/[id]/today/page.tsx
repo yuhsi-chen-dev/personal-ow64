@@ -20,7 +20,7 @@ export default async function TodayPage({ params }: { params: Promise<{ id: stri
     <main className="w-full mx-auto max-w-3xl px-4 md:px-6 pb-16 flex flex-col gap-6">
       <header className="sticky top-0 z-20 -mx-4 md:-mx-6 flex items-center gap-3 border-b border-line bg-bg/80 px-4 md:px-6 py-3 backdrop-blur-xl">
         <Link
-          href="/"
+          href="/dashboard"
           aria-label="回到計劃表列表"
           className="lift tap grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
         >

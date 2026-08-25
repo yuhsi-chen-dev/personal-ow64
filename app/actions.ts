@@ -86,7 +86,7 @@ export async function saveAction(_prev: Result, form: FormData): Promise<Result>
   return withUser(async (userId) => {
     await upsertAction(userId, parsed.data);
     // 一次打卡同時改變格子頁、今天頁與回顧頁，所以 revalidate 整個 layout 底下。
-    revalidatePath(str(form, "planId") ? `/plans/${str(form, "planId")}` : "/", "layout");
+    revalidatePath(str(form, "planId") ? `/plans/${str(form, "planId")}` : "/dashboard", "layout");
     return {};
   });
 }
@@ -108,7 +108,7 @@ export async function logProgress(_prev: Result, form: FormData): Promise<Result
 
     await logOnce(userId, { ...parsed.data, cadence: action.cadence });
     // 一次打卡同時改變格子頁、今天頁與回顧頁，所以 revalidate 整個 layout 底下。
-    revalidatePath(str(form, "planId") ? `/plans/${str(form, "planId")}` : "/", "layout");
+    revalidatePath(str(form, "planId") ? `/plans/${str(form, "planId")}` : "/dashboard", "layout");
     return {};
   });
 }
@@ -120,7 +120,7 @@ export async function renamePlanTitle(_prev: Result, form: FormData): Promise<Re
   return withUser(async (userId) => {
     await renamePlan(userId, parsed.data.planId, parsed.data.title);
     revalidatePath(`/plans/${parsed.data.planId}`, "layout");
-    revalidatePath("/");
+    revalidatePath("/dashboard");
     return {};
   });
 }
@@ -132,8 +132,8 @@ export async function removePlan(_prev: Result, form: FormData): Promise<Result>
 
   return withUser(async (userId) => {
     await deletePlan(userId, parsed.data.planId);
-    revalidatePath("/");
-    redirect("/");
+    revalidatePath("/dashboard");
+    redirect("/dashboard");
   });
 }
 
