@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { ChevronLeft, LineChart, Sunrise } from "lucide-react";
+import { PlanNav } from "./plan-nav.tsx";
+import { ChevronLeft } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth.ts";
 import { loadPlan } from "@/db/queries.ts";
@@ -32,31 +33,19 @@ export default async function PlanPage({
   return (
     // body 是 flex column，這裡的 w-full 不能拿掉，否則 main 會縮成內容寬度。
     <main className="w-full mx-auto max-w-6xl px-4 md:px-6 pb-44 md:pb-10 flex flex-col gap-6">
-      <header className="sticky top-0 z-20 -mx-4 md:-mx-6 flex items-center gap-3 border-b border-line bg-bg/80 px-4 md:px-6 py-3 backdrop-blur-xl">
+      <header className="sticky top-0 z-20 -mx-4 md:-mx-6 flex items-center gap-2 md:gap-3 border-b border-line bg-bg/80 px-4 md:px-6 py-3 backdrop-blur-xl">
         <Link
           href="/dashboard"
           aria-label="回到計劃表列表"
+          title="回到計劃表列表"
           className="lift tap grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
         >
           <ChevronLeft size={16} />
         </Link>
-        <h1 className="display min-w-0 flex-1 truncate text-base md:text-xl font-semibold">{data.plan.title}</h1>
-        <Link
-          href={`/plans/${id}/today`}
-          className="lift tap grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
-          aria-label="今天"
-          title="今天"
-        >
-          <Sunrise size={16} />
-        </Link>
-        <Link
-          href={`/plans/${id}/review`}
-          className="lift tap grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-dim hover:text-text"
-          aria-label="回顧"
-          title="回顧"
-        >
-          <LineChart size={16} />
-        </Link>
+        <h1 className="display min-w-0 flex-1 truncate text-base md:text-xl font-semibold">
+          {data.plan.title}
+        </h1>
+        <PlanNav id={id} current="board" />
         <ThemeToggle />
       </header>
 
