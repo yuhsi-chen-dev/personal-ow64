@@ -44,6 +44,9 @@ export const actions = pgTable(
     // 四類的語意見 docs/decisions/0008-tracking-taxonomy.md
     trackingType: text("tracking_type", { enum: ["habit", "quota", "milestone", "mantra"] }).notNull(),
     cadence: text("cadence", { enum: ["daily", "weekly", "monthly"] }), // 僅 habit 型使用
+    // 僅 habit 型使用：一期要做幾次。null 等同 1（舊資料就是這個意思）。
+    // 沒有它的話 cadence 隱含「每期一次」，「每週跑 3 次」記到第二次就被冪等擋掉。
+    timesPerPeriod: integer("times_per_period"),
     target: integer("target"), // 僅 quota 型使用
     archivedAt: timestamp("archived_at", { withTimezone: true }),
   },

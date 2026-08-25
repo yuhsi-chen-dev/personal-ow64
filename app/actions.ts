@@ -5,11 +5,11 @@ import { redirect } from "next/navigation";
 import { requireUserId } from "@/auth.ts";
 import {
   NotYours, deletePlan, findAction, insertPlan, logOnce, removeAction, removeSubGoal, renamePlan,
-  upsertAction, upsertSubGoal,
+  undoLog, upsertAction, upsertSubGoal,
 } from "@/db/writes.ts";
 import { loadPlan } from "@/db/queries.ts";
 import {
-  actionInput, logInput, planIdInput, planInput, planRenameInput, removeInput, subGoalInput,
+  actionInput, logInput, planIdInput, planInput, planRenameInput, removeInput, subGoalInput, undoInput,
 } from "@/lib/schemas.ts";
 
 export type Result = { error?: string };
@@ -73,12 +73,19 @@ export async function saveAction(_prev: Result, form: FormData): Promise<Result>
   // 其餘型態直接丟掉使用者填的值，不要拿去驗證然後回一個他看不懂的錯。
   const rawType = str(form, "trackingType");
   const rawTarget = str(form, "target");
+  const rawTimes = str(form, "timesPerPeriod");
   const parsed = actionInput.safeParse({
     subGoalId: str(form, "subGoalId"),
     position: num(form, "position"),
     title: str(form, "title"),
     trackingType: rawType,
-    ...(rawType === "habit" ? { cadence: str(form, "cadence") || "daily" } : {}),
+    ...(rawType === "habit"
+      ? {
+          cadence: str(form, "cadence") || "daily",
+          // 空白＝沿用預設的 1，不要送 NaN 進去換一個看不懂的錯誤訊息。
+          ...(rawTimes !== "" ? { timesPerPeriod: Number(rawTimes) } : {}),
+        }
+      : {}),
     ...(rawType === "quota" && rawTarget !== "" ? { target: Number(rawTarget) } : {}),
   });
   if (!parsed.success) return fail(parsed.error);
@@ -106,8 +113,26 @@ export async function logProgress(_prev: Result, form: FormData): Promise<Result
     });
     if (!parsed.success) return fail(parsed.error);
 
-    await logOnce(userId, { ...parsed.data, cadence: action.cadence });
+    await logOnce(userId, { ...parsed.data, cadence: action.cadence, timesPerPeriod: action.timesPerPeriod });
     // 一次打卡同時改變格子頁、今天頁與回顧頁，所以 revalidate 整個 layout 底下。
+    revalidatePath(str(form, "planId") ? `/plans/${str(form, "planId")}` : "/dashboard", "layout");
+    return {};
+  });
+}
+
+/**
+ * 撤銷誤觸的打卡：刪掉今天最後一筆。
+ *
+ * 沒有兩段式確認——撤銷本身就是後悔鍵，再確認一次只是多一步；
+ * 真的撤錯了再按一次打卡就好，成本對稱。
+ */
+export async function undoProgress(_prev: Result, form: FormData): Promise<Result> {
+  const parsed = undoInput.safeParse({ actionId: str(form, "actionId"), day: str(form, "day") });
+  if (!parsed.success) return fail(parsed.error);
+
+  return withUser(async (userId) => {
+    const removed = await undoLog(userId, parsed.data.actionId, parsed.data.day);
+    if (!removed) return { error: "今天沒有可以撤銷的紀錄" };
     revalidatePath(str(form, "planId") ? `/plans/${str(form, "planId")}` : "/dashboard", "layout");
     return {};
   });
@@ -202,7 +227,14 @@ export async function acceptSubGoals(
 export async function acceptActions(
   planId: string,
   subGoalId: string,
-  items: { position: number; title: string; trackingType: string; cadence: string | null; target: number | null }[],
+  items: {
+    position: number;
+    title: string;
+    trackingType: string;
+    cadence: string | null;
+    timesPerPeriod: number | null;
+    target: number | null;
+  }[],
 ): Promise<Result> {
   return withUser(async (userId) => {
     const data = await loadPlan(userId, planId);
@@ -222,7 +254,9 @@ export async function acceptActions(
         position: item.position,
         title: item.title,
         trackingType: item.trackingType,
-        ...(item.trackingType === "habit" ? { cadence: item.cadence ?? "daily" } : {}),
+        ...(item.trackingType === "habit"
+          ? { cadence: item.cadence ?? "daily", timesPerPeriod: item.timesPerPeriod ?? 1 }
+          : {}),
         ...(item.trackingType === "quota" && item.target !== null ? { target: item.target } : {}),
       });
       if (!parsed.success) return fail(parsed.error);

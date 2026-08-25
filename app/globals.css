@@ -130,6 +130,26 @@ body {
   }
 }
 
+/*
+ * 存檔成功後那一下「已儲存」。純粹淡出，不做位移。
+ * 刻意**不**包進 prefers-reduced-motion：這個動畫是唯一讓它消失的東西，
+ * 關掉的話字會永遠留在畫面上。淡出不是動態效果，是清場。
+ */
+@keyframes fade-out {
+  0%,
+  55% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.flash {
+  animation: fade-out 1.6s ease-in forwards;
+  pointer-events: none;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .rise {
     animation: rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;

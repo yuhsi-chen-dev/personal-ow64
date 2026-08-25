@@ -1,14 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Flag, Flame, Hash, Plus, Quote, Repeat, Sunrise } from "lucide-react";
+import { Check, Flag, Flame, Hash, Plus, Quote, Repeat, Sunrise, Undo2 } from "lucide-react";
 import { ActionForm } from "@/app/action-form.tsx";
-import { logProgress } from "@/app/actions.ts";
+import { logProgress, undoProgress } from "@/app/actions.ts";
 import { useToday } from "@/app/use-today.ts";
-import { buildBoard, streak, toBlocks, type BoardAction, type BoardSubGoal, type Cell } from "@/lib/board.ts";
+import { buildBoard, cellAction, streak, toBlocks, type BoardAction, type BoardSubGoal, type Cell } from "@/lib/board.ts";
 import type { Cadence } from "@/lib/day.ts";
 import { coreFill, slotColor, slotFill } from "@/lib/palette.ts";
-import type { Action, Log, TrackingType } from "@/lib/progress.ts";
+import type { Log, TrackingType } from "@/lib/progress.ts";
 import { tally, todayState, type TodayState } from "@/lib/today.ts";
 
 type Props = {
@@ -27,6 +27,8 @@ const TYPE = {
 } satisfies Record<TrackingType, { label: string; Icon: typeof Repeat }>;
 
 const CADENCE = { daily: "每日", weekly: "每週", monthly: "每月" } satisfies Record<Cadence, string>;
+/** 「今天已完成」那類說法要用這一期，不是頻率本身。 */
+const THIS_PERIOD = { daily: "今天", weekly: "本週", monthly: "本月" } satisfies Record<Cadence, string>;
 const PERIOD_UNIT = { daily: "天", weekly: "週", monthly: "個月" } satisfies Record<Cadence, string>;
 
 // 統計區間在這頁用不到（今天只問「做了沒」，不問「這個月做得怎樣」），
@@ -34,11 +36,6 @@ const PERIOD_UNIT = { daily: "天", weekly: "週", monthly: "個月" } satisfies
 const UNUSED_RANGE = 30;
 
 type ActionCell = Extract<Cell, { kind: "action" }>;
-
-/** 顯示模型的格子轉成進度模型的行為。id 由呼叫端確認過才傳進來。 */
-function actionOf(cell: ActionCell, id: string): Action {
-  return { id, trackingType: cell.trackingType, cadence: cell.cadence, target: cell.target };
-}
 
 export function TodayMap({ planId, planTitle, subGoals, actions, logs }: Props) {
   const today = useToday();
@@ -50,7 +47,7 @@ export function TodayMap({ planId, planTitle, subGoals, actions, logs }: Props) 
   const board = buildBoard({ planTitle, subGoals, actions, logs, rangeDays: UNUSED_RANGE, today });
   const blocks = toBlocks(board.cells);
   const stateOf = (cell: Cell): TodayState | null =>
-    cell.kind === "action" && cell.id ? todayState(actionOf(cell, cell.id), logs, today) : null;
+    cell.kind === "action" && cell.id ? todayState(cellAction(cell, cell.id), logs, today) : null;
 
   const counts = tally(board.cells.map(stateOf).filter((s): s is TodayState => s !== null));
   const selected = selectedKey === null ? null : board.cells.find((c) => keyOf(c) === selectedKey) ?? null;
@@ -100,7 +97,8 @@ function MapCell({
   cell, state, selected, onSelect,
 }: { cell: Cell; state: TodayState | null; selected: boolean; onSelect: () => void }) {
   // 今天有事的格子才點得動。核心、次目標、空格與 idle 都只是背景。
-  const live = state === "due" || state === "done" || state === "mantra";
+  // open（里程碑／累計）也點得動——它不計分，但仍然可以推進。
+  const live = state === "due" || state === "done" || state === "open" || state === "mantra";
   const ring = cell.kind === "core" ? "var(--accent)" : slotColor(cell.slot);
 
   return (
@@ -134,8 +132,11 @@ function MapCell({
 }
 
 /**
- * 今天的地圖只有三種明暗：要做的亮、做完的半亮、其餘一律沉下去。
- * 沉下去的包含「今天沒它的事」與「還沒填」——今天早上不需要分辨這兩者。
+ * 今天的地圖分四階：今天該做的最亮、做完的半亮、**隨時可以推進的（open）介於中間偏暗**、
+ * 其餘一律沉下去。沉下去的包含「今天沒它的事」與「還沒填」——今天早上不需要分辨這兩者。
+ *
+ * open 要看得出「有東西、可以按」，但濃度必須明顯低於 due，
+ * 不然一年期的里程碑會跟今天真的該做的事搶同一個視覺順位。
  */
 function fillOf(cell: Cell, state: TodayState | null): string {
   // 核心與次目標只是地標，濃度要明顯壓在 done（0.45）之下，
@@ -147,6 +148,8 @@ function fillOf(cell: Cell, state: TodayState | null): string {
       return slotFill(cell.slot, 1);
     case "done":
       return slotFill(cell.slot, 0.45);
+    case "open":
+      return slotFill(cell.slot, 0.3);
     case "mantra":
       return "var(--surface-2)";
     default:
@@ -197,15 +200,17 @@ function Detail({
       <div className={`${box} text-sm text-dim`}>
         {total === 0
           ? "這份計劃表今天沒有要做的事。去格子頁填點東西，或者今天就休息。"
-          : "有顏色的格子是今天要做的，點一下看它是什麼。"}
+          : "亮的格子是今天要做的，淡的是隨時可以推進的目標。點一下看它是什麼。"}
       </div>
     );
   }
 
-  const state = todayState(actionOf(cell, cell.id), logs, today);
+  const state = todayState(cellAction(cell, cell.id), logs, today);
   const { Icon, label } = TYPE[cell.trackingType];
-  const run = streak(logs, { id: cell.id, trackingType: cell.trackingType, cadence: cell.cadence }, today);
+  const run = streak(logs, cellAction(cell, cell.id), today);
   const color = slotColor(cell.slot);
+  // 撤銷只收回今天的最後一筆，所以數的是當天筆數。
+  const todayCount = logs.filter((l) => l.actionId === cell.id && l.day === today).length;
 
   return (
     <div className={`${box} flex flex-col gap-3`}>
@@ -220,7 +225,9 @@ function Detail({
         <span className="flex items-center gap-1.5">
           <Icon size={13} />
           {label}
-          {cell.trackingType === "habit" ? `・${CADENCE[cell.cadence ?? "daily"]}` : null}
+          {cell.trackingType === "habit"
+            ? `・${CADENCE[cell.cadence ?? "daily"]}${cell.periodNeed > 1 ? ` ${cell.periodNeed} 次` : ""}`
+            : null}
           {cell.trackingType === "quota" && cell.target ? `・目標 ${cell.target}` : null}
         </span>
         {run > 0 ? (
@@ -234,9 +241,47 @@ function Detail({
       {state === "mantra" ? (
         <p className="text-xs text-dim">信念型不打卡、不計入今天的數字。看到它就好。</p>
       ) : (
-        <LogButton cell={cell} planId={planId} today={today} state={state} color={color} />
+        <>
+          <LogButton cell={cell} planId={planId} today={today} state={state} color={color} />
+          {todayCount > 0 ? (
+            <UndoRow actionId={cell.id} planId={planId} today={today} count={todayCount} />
+          ) : null}
+          {state === "open" ? (
+            // 不講的話，使用者會按下去然後發現上面的數字沒動，以為壞了。
+            <p className="text-xs text-dim">這種目標沒有週期，隨時可以推進，不算進今天的數字。</p>
+          ) : null}
+        </>
       )}
     </div>
+  );
+}
+
+/**
+ * 誤觸的後悔鍵：撤銷今天的最後一筆。跟格子頁面板上的那一顆同一支 server action。
+ * 只在今天真的有紀錄時才出現，不然它就是一顆按了會出錯的死鍵。
+ */
+function UndoRow({
+  actionId, planId, today, count,
+}: { actionId: string; planId: string; today: string; count: number }) {
+  return (
+    <ActionForm action={undoProgress} className="flex items-center justify-center gap-2">
+      {({ pending }) => (
+        <>
+          <input type="hidden" name="planId" value={planId} />
+          <input type="hidden" name="actionId" value={actionId} />
+          <input type="hidden" name="day" value={today} />
+          <span className="text-xs text-dim">今天記了 {count} 次</span>
+          <button
+            type="submit"
+            disabled={pending}
+            className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-dim cursor-pointer transition hover:text-text disabled:cursor-default disabled:opacity-50"
+          >
+            <Undo2 size={12} />
+            {pending ? "撤銷中…" : "撤銷上一次"}
+          </button>
+        </>
+      )}
+    </ActionForm>
   );
 }
 
@@ -251,7 +296,9 @@ function LogButton({
   return (
     <ActionForm action={logProgress} className="flex flex-col gap-1.5">
       {({ pending }) => {
-        const done = locked || (pending && !quota);
+        // 樂觀回饋：按下去立刻加一次。一期要三次的走到 1/3 就停，不會直接變成已完成。
+        const optimistic = cell.periodDone + (pending && !quota ? 1 : 0);
+        const done = locked || (pending && !quota && optimistic >= cell.periodNeed);
         return (
           <>
             <input type="hidden" name="planId" value={planId} />
@@ -267,7 +314,13 @@ function LogButton({
               style={{ backgroundColor: color, opacity: done ? 0.55 : 1 }}
             >
               {quota ? <Plus size={16} strokeWidth={3} /> : <Check size={16} strokeWidth={3} />}
-              {done ? "今天已完成" : quota ? "加一次" : "完成"}
+              {done
+                ? `${THIS_PERIOD[cell.cadence ?? "daily"]}已完成`
+                : quota
+                  ? "加一次"
+                  : cell.periodNeed > 1
+                    ? `${THIS_PERIOD[cell.cadence ?? "daily"]} ${optimistic}/${cell.periodNeed}`
+                    : "完成"}
             </button>
           </>
         );

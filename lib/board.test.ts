@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  blockOfCell, buildBoard, heat, recentPeriods, streak, toBlocks,
+  blockOfCell, buildBoard, cellAction, heat, recentPeriods, streak, toBlocks,
   type BoardAction, type BoardSubGoal,
 } from "./board.ts";
 import { CORE_COORD, SIZE } from "./mandala.ts";
@@ -11,7 +11,7 @@ import { coreFill, slotFill, slotHue } from "./palette.ts";
 const at = (cells: unknown[], r: number, c: number) => cells[r * SIZE + c];
 const sg = (position: number, id: string, title: string): BoardSubGoal => ({ id, position, title });
 const act = (o: Partial<BoardAction> & { id: string; subGoalId: string; position: number }): BoardAction => ({
-  title: "行為", trackingType: "habit", cadence: "daily", target: null, ...o,
+  title: "行為", trackingType: "habit", cadence: "daily", timesPerPeriod: null, target: null, ...o,
 });
 
 const base = { planTitle: "核心", subGoals: [], actions: [], logs: [], rangeDays: 30, today: "2026-08-22" };
@@ -127,6 +127,20 @@ test("toBlocks 切成 9 塊各 9 格，塊內順序與原圖一致", () => {
   assert.equal(own[4]!.kind, "subGoal");
 });
 
+test("cellAction 把格子上的欄位原封不動帶回行為模型", () => {
+  const b = buildBoard({
+    ...base,
+    subGoals: [sg(0, "sg0", "次目標")],
+    actions: [act({ id: "a1", subGoalId: "sg0", position: 0, cadence: "weekly", timesPerPeriod: 3 })],
+  });
+  const cell = b.cells.find((c) => c.kind === "action" && c.id === "a1");
+  assert.ok(cell?.kind === "action");
+  // 少帶任何一欄都會讓 lib/ 的判斷安靜地算錯，所以整包比對而不是逐欄挑著看。
+  assert.deepEqual(cellAction(cell, "a1"), {
+    id: "a1", trackingType: "habit", cadence: "weekly", timesPerPeriod: 3, target: null,
+  });
+});
+
 test("blockOfCell：本體算中央，鏡像與底下的行為算外圍", () => {
   assert.equal(blockOfCell({ kind: "core", title: "", progress: null }), 4);
   assert.equal(blockOfCell({ kind: "subGoal", slot: 3, mirrored: false, title: "", progress: null }), 4);
@@ -136,7 +150,7 @@ test("blockOfCell：本體算中央，鏡像與底下的行為算外圍", () => 
   assert.equal(
     blockOfCell({
       kind: "action", slot: 3, index: 5, title: "", trackingType: "habit",
-      cadence: "daily", target: null, progress: null, doneNow: false,
+      cadence: "daily", target: null, progress: null, periodDone: 0, periodNeed: 1, doneNow: false,
     }),
     own,
     "行為要跟它的次目標鏡像在同一塊",
