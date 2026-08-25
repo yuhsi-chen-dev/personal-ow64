@@ -118,7 +118,6 @@ Google 帳號實際登入 production 成功，同意畫面顯示 app 名稱與 l
 
 ## 尚未開始
 
-- `README.md` 還是 `create-next-app` 的預設內容，`public/` 裡五個預設 SVG 也沒人引用。
 - 封存資料的復原入口（資料還在，目前只能手動下 SQL，見 `decisions/0009`）。
 
 **已經發布了，所以下面這幾條不再是「開放註冊之前要補」，是欠著的**
